@@ -1,90 +1,165 @@
-import time
-import cv2
+#!/usr/bin/env python
+from __future__ import print_function
+import argparse
+import random
 import numpy as np
-import chainer
-import glob
 import os
-from chainer import serializers, optimizers, Variable, cuda
-import chainer.functions as F
-from darknet19 import *
-from lib.image_generator import *
+import pickle
 
-# hyper parameters
-input_height, input_width = (224, 224)
-item_path = "./items"
-background_path = "./backgrounds"
-label_file = "./data/label.txt"
-backup_path = "backup"
-batch_size = 32
-max_batches = 3000
-learning_rate = 0.001
-lr_decay_power = 4
-momentum = 0.9
-weight_decay = 0.0005
+import chainer
+from chainer import serializers
+from chainer import training
+from chainer.training import extensions
 
-# load image generator
-print("loading image generator...")
-generator = ImageGenerator(item_path, background_path)
+import darknet19
 
-with open(label_file, "r") as f:
-    labels = f.read().strip().split("\n")
 
-# load model
-print("loading model...")
-model = Darknet19Predictor(Darknet19())
-backup_file = "%s/backup.model" % (backup_path)
-if os.path.isfile(backup_file):
-    serializers.load_hdf5(backup_file, model) # load saved model
-model.predictor.train = True
-cuda.get_device(0).use()
-model.to_gpu() # for gpu
+class PreprocessedDataset(chainer.dataset.DatasetMixin):
 
-optimizer = optimizers.MomentumSGD(lr=learning_rate, momentum=momentum)
-optimizer.use_cleargrads()
-optimizer.setup(model)
-optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
+    def __init__(self, path, root, crop_size, random=True):
+        self.base = chainer.datasets.LabeledImageDataset(path, root)
+        self.crop_size = crop_size
+        self.random = random
 
-# start to train
-print("start training")
-for batch in range(max_batches):
-    # generate sample
-    x, t = generator.generate_samples(
-        n_samples=batch_size,
-        n_items=1,
-        crop_width=input_width,
-        crop_height=input_height,
-        min_item_scale=0.3,
-        max_item_scale=1.3,
-        rand_angle=25,
-        minimum_crop=0.8,
-        delta_hue=0.01,
-        delta_sat_scale=0.5,
-        delta_val_scale=0.5
-    )
-    x = Variable(x)
-    one_hot_t = []
-    for i in range(len(t)):
-        one_hot_t.append(t[i][0]["one_hot_label"])
-    x.to_gpu()
-    one_hot_t = np.array(one_hot_t, dtype=np.float32)
-    one_hot_t = Variable(one_hot_t)
-    one_hot_t.to_gpu()
+    def __len__(self):
+        return len(self.base)
 
-    y, loss, accuracy = model(x, one_hot_t)
-    print("[batch %d (%d images)] learning rate: %f, loss: %f, accuracy: %f" % (batch+1, (batch+1) * batch_size, optimizer.lr, loss.data, accuracy.data))
+    def get_example(self, i):
+        # It reads the i-th image/label pair and return a preprocessed image.
+        # It applies following preprocesses:
+        #     - Cropping (random or center rectangular)
+        #     - Random flip
+        #     - Scaling to [0, 1] value
+        crop_size = self.crop_size
 
-    optimizer.zero_grads()
-    loss.backward()
+        image, label = self.base[i]
+        _, h, w = image.shape
 
-    optimizer.lr = learning_rate * (1 - batch / max_batches) ** lr_decay_power # Polynomial decay learning rate
-    optimizer.update()
+        if self.random:
+            # Randomly crop a region and flip the image
+            top = random.randint(0, h - crop_size - 1)
+            left = random.randint(0, w - crop_size - 1)
+            if random.randint(0, 1):
+                image = image[:, :, ::-1]
+        else:
+            # Crop the center
+            top = (h - crop_size) // 2
+            left = (w - crop_size) // 2
+        bottom = top + crop_size
+        right = left + crop_size
 
-    # save model
-    if (batch+1) % 1000 == 0:
-        model_file = "%s/%s.model" % (backup_path, batch+1)
-        print("saving model to %s" % (model_file))
-        serializers.save_hdf5(model_file, model)
-        serializers.save_hdf5(backup_file, model)
+        image = image[:, top:bottom, left:right]
+        image *= (1.0 / 255.0)  # Scale to [0, 1]
+        return image, label
 
-print("saving model to %s/darknet19_final.model" % (backup_path))
-serializers.save_hdf5("%s/darknet19_final.model" % (backup_path), model)
+
+class TestModeEvaluator(extensions.Evaluator):
+
+    def evaluate(self):
+        model = self.get_target('main')
+        model.train = False
+        ret = super(TestModeEvaluator, self).evaluate()
+        model.train = True
+        return ret
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Learning convnet from ILSVRC2012 dataset')
+    parser.add_argument('train', help='Path to training image-label list file')
+    parser.add_argument('val', help='Path to validation image-label list file')
+    parser.add_argument('--batchsize', '-B', type=int, default=32, help='Learning minibatch size')
+    parser.add_argument('--epoch', '-E', type=int, default=10, help='Number of epochs to train')
+    parser.add_argument(
+        '--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU')
+    parser.add_argument('--initmodel', help='Initialize the model from given file')
+    parser.add_argument(
+        '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
+    parser.add_argument(
+        '--resume', '-r', default='', help='Initialize the trainer from given file')
+    parser.add_argument('--out', '-o', default='result', help='Output directory')
+    parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
+    parser.add_argument('--insize', '-s', default='224', help='Input image height, width')
+    parser.add_argument(
+        '--val_batchsize', '-b', type=int, default=250, help='Validation minibatch size')
+    parser.add_argument('--test', action='store_true')
+    parser.set_defaults(test=False)
+    args = parser.parse_args()
+
+    # Initialize the model to train
+
+    model = darknet19.Darknet19()
+    model.insize = int(args.insize)
+
+    if args.initmodel:
+        print('Load model from', args.initmodel)
+        chainer.serializers.load_npz(args.initmodel, model)
+    if args.gpu >= 0:
+        chainer.cuda.get_device_from_id(args.gpu).use()  # Make the GPU current
+        model.to_gpu()
+
+    # Load the datasets
+    train = PreprocessedDataset(args.train, args.root, model.insize)
+    val = PreprocessedDataset(args.val, args.root, model.insize, False)
+    # These iterators load the images with subprocesses running in parallel to
+    # the training/validation.
+    train_iter = chainer.iterators.MultiprocessIterator(
+        train, args.batchsize, n_processes=args.loaderjob)
+    val_iter = chainer.iterators.MultiprocessIterator(
+        val, args.val_batchsize, repeat=False, n_processes=args.loaderjob)
+
+    # Set up an optimizer
+    optimizer = chainer.optimizers.MomentumSGD(lr=0.001, momentum=0.9)
+    optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay=0.0005))
+    # optimizer.lr = learning_rate * (
+    # 1 - batch / max_batches)**lr_decay_power  # Polynomial decay learning rate
+
+    # Set up a trainer
+    updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
+    trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
+
+    val_interval = 25, 'epoch'
+    log_interval = 1, 'epoch'
+
+    learning_rate = extensions.LinearShift("lr", (0.001, 0), (0, int(args.epoch)))
+    learning_rate.trigger = 1, 'epoch'
+    trainer.extend(learning_rate)
+
+    # Evaluate the model with the test dataset for each epoch
+    trainer.extend(extensions.Evaluator(val_iter, model, device=args.gpu))
+
+    trainer.extend(TestModeEvaluator(val_iter, model, device=args.gpu), trigger=val_interval)
+    trainer.extend(extensions.dump_graph('main/loss'))
+    trainer.extend(extensions.snapshot(), trigger=val_interval)
+    trainer.extend(
+        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'), trigger=val_interval)
+    # Be careful to pass the interval directly to LogReport
+    # (it determines when to emit log rather than when to read observations)
+    trainer.extend(extensions.LogReport(trigger=log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=log_interval)
+    trainer.extend(
+        extensions.PrintReport([
+            'epoch', 'iteration', 'main/loss', 'validation/main/loss', 'main/accuracy',
+            'validation/main/accuracy', 'lr'
+        ]),
+        trigger=log_interval)
+    trainer.extend(extensions.ProgressBar(update_interval=100))
+
+    # Save two plot images to the result dir
+    if extensions.PlotReport.available():
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/loss', 'validation/main/loss'], 'epoch', file_name='loss.png'))
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
+    if args.resume:
+        chainer.serializers.load_npz(args.resume, trainer)
+    trainer.run()
+    model.to_cpu()
+    serializers.save_npz(os.path.join(args.out, "model.npz"), model)
+    pickle.dump(model, open(os.path.join(args.out, "test.model.pickle"), 'wb'), -1)
+
+
+if __name__ == '__main__':
+    main()
