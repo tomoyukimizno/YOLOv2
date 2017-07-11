@@ -6,8 +6,6 @@ import chainer.functions as F
 import argparse
 from darknet19 import *
 from yolov2 import *
-from yolov2_grid_prob import *
-from yolov2_bbox import *
 
 n_classes = 10
 n_boxes = 5
