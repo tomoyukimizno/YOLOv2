@@ -2,7 +2,6 @@
 from __future__ import print_function
 import argparse
 import random
-import numpy as np
 import os
 import pickle
 
@@ -110,7 +109,7 @@ def main():
     # Set up an optimizer
     optimizer = chainer.optimizers.MomentumSGD(lr=0.001, momentum=0.9)
     optimizer.setup(model)
-    optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay=0.0005))
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.0005))
     # optimizer.lr = learning_rate * (
     # 1 - batch / max_batches)**lr_decay_power  # Polynomial decay learning rate
 

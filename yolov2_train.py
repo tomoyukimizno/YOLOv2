@@ -1,102 +1,155 @@
-import time
-import cv2
-import numpy as np
-import chainer
-import glob
+#!/usr/bin/env python
+from __future__ import print_function
+import argparse
+import random
 import os
-from chainer import serializers, optimizers, Variable, cuda
-import chainer.functions as F
-from yolov2 import *
-from lib.utils import *
-from lib.image_generator import *
+import pickle
 
-# hyper parameters
-train_sizes = [320, 352, 384, 416, 448]
-item_path = "./items"
-background_path = "./backgrounds"
-initial_weight_file = "./backup/partial.model"
-backup_path = "backup"
-backup_file = "%s/backup.model" % (backup_path)
-batch_size = 16
-max_batches = 30000
-learning_rate = 1e-5
-learning_schedules = { 
-    "0"    : 1e-5,
-    "500"  : 1e-4,
-    "10000": 1e-5,
-    "20000": 1e-6 
-}
+import chainer
+from chainer import serializers
+from chainer import training
+from chainer.training import extensions
 
-lr_decay_power = 4
-momentum = 0.9
-weight_decay = 0.005
-n_classes = 10
-n_boxes = 5
+import yolov2
 
-# load image generator
-print("loading image generator...")
-generator = ImageGenerator(item_path, background_path)
 
-# load model
-print("loading initial model...")
-yolov2 = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
-model = YOLOv2Predictor(yolov2)
-serializers.load_hdf5(initial_weight_file, model)
+class PreprocessedDataset(chainer.dataset.DatasetMixin):
 
-model.predictor.train = True
-model.predictor.finetune = False
-cuda.get_device(0).use()
-model.to_gpu()
+    def __init__(self, path, root):
+        self.base = chainer.datasets.ImageDataset(path, root)
+        # with open(path, "r") as f:
+        with open("train.data\\label_bbox", "r") as f:
+            self.path = f.read().strip().split("\n")
 
-optimizer = optimizers.MomentumSGD(lr=learning_rate, momentum=momentum)
-optimizer.use_cleargrads()
-optimizer.setup(model)
-#optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
+    def __len__(self):
+        return len(self.base)
 
-# start to train
-print("start training")
-for batch in range(max_batches):
-    if str(batch) in learning_schedules:
-        optimizer.lr = learning_schedules[str(batch)]
-    if batch % 80 == 0:
-        input_width = input_height = train_sizes[np.random.randint(len(train_sizes))]
+    def get_example(self, i):
+        image = self.base[i]
+        image *= (1.0 / 255.0)  # Scale to [0, 1]
+        """
+        label_path = os.path.join("tmp\\label", self.path[i].split("\\")[-1].split(".")[0])
+        with open(label_path, "r") as f:
+            labels_bboxes = f.read().strip().split("\n")
+        for label_bbox in labels_bboxes:
+            label, top, left, bottom, right = labels_bboxes[0].split(" ")
+            print(top)
+            print(left)
+            print(bottom)
+            print(right)
+            yield image, label, top, left, bottom, right
+        """
+        # print(self.path[i])
+        label, top, left, bottom, right = self.path[i].split(" ")
+        return image, int(label), int(top), int(left), int(bottom), int(right)
+        # return image, label, center_y, center_x, height, width のどちらか
 
-    # generate sample
-    x, t = generator.generate_samples(
-        n_samples=16,
-        n_items=3,
-        crop_width=input_width,
-        crop_height=input_height,
-        min_item_scale=0.5,
-        max_item_scale=2.5,
-        rand_angle=15,
-        minimum_crop=0.8,
-        delta_hue=0.01,
-        delta_sat_scale=0.5,
-        delta_val_scale=0.5
-    )
-    x = Variable(x)
-    x.to_gpu()
 
-    # forward
-    loss = model(x, t)
-    print("batch: %d     input size: %dx%d     learning rate: %f    loss: %f" % (batch, input_height, input_width, optimizer.lr, loss.data))
-    print("/////////////////////////////////////")
+class TestModeEvaluator(extensions.Evaluator):
 
-    # backward and optimize
-    optimizer.zero_grads()
-    loss.backward()
-    optimizer.update()
+    def evaluate(self):
+        model = self.get_target('main')
+        model.train = False
+        ret = super(TestModeEvaluator, self).evaluate()
+        model.train = True
+        return ret
 
-    # save model
-    if (batch+1) % 500 == 0:
-        model_file = "%s/%s.model" % (backup_path, batch+1)
-        print("saving model to %s" % (model_file))
-        serializers.save_hdf5(model_file, model)
-        serializers.save_hdf5(backup_file, model)
 
-print("saving model to %s/yolov2_final.model" % (backup_path))
-serializers.save_hdf5("%s/yolov2_final.model" % (backup_path), model)
+def main():
+    parser = argparse.ArgumentParser(description='Learning convnet from ILSVRC2012 dataset')
+    parser.add_argument('train', help='Path to training image-label list file')
+    parser.add_argument('val', help='Path to validation image-label list file')
+    parser.add_argument('--batchsize', '-B', type=int, default=32, help='Learning minibatch size')
+    parser.add_argument('--epoch', '-E', type=int, default=10, help='Number of epochs to train')
+    parser.add_argument(
+        '--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU')
+    parser.add_argument('--initmodel', help='Initialize the model from given file')
+    parser.add_argument(
+        '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
+    parser.add_argument(
+        '--resume', '-r', default='', help='Initialize the trainer from given file')
+    parser.add_argument('--out', '-o', default='result', help='Output directory')
+    parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
+    parser.add_argument(
+        '--val_batchsize', '-b', type=int, default=250, help='Validation minibatch size')
+    parser.add_argument('--test', action='store_true')
+    parser.set_defaults(test=False)
+    args = parser.parse_args()
 
-model.to_cpu()
-serializers.save_hdf5("%s/yolov2_final_cpu.model" % (backup_path), model)
+    # Initialize the model to train
+
+    model = yolov2.YOLOv2(n_classes=10, n_boxes=5)
+
+    if args.initmodel:
+        print('Load model from', args.initmodel)
+        chainer.serializers.load_npz(args.initmodel, model)
+    if args.gpu >= 0:
+        chainer.cuda.get_device_from_id(args.gpu).use()  # Make the GPU current
+        model.to_gpu()
+
+    # Load the datasets
+    train = PreprocessedDataset(args.train, args.root)
+    val = PreprocessedDataset(args.val, args.root)
+    # These iterators load the images with subprocesses running in parallel to
+    # the training/validation.
+    train_iter = chainer.iterators.MultiprocessIterator(
+        train, args.batchsize, n_processes=args.loaderjob)
+    val_iter = chainer.iterators.MultiprocessIterator(
+        val, args.val_batchsize, repeat=False, n_processes=args.loaderjob)
+
+    # Set up an optimizer
+    optimizer = chainer.optimizers.MomentumSGD(lr=0.001, momentum=0.9)
+    optimizer.setup(model)
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.0005))
+    # optimizer.lr = learning_rate * (
+    # 1 - batch / max_batches)**lr_decay_power  # Polynomial decay learning rate
+
+    # Set up a trainer
+    updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
+    trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
+
+    val_interval = 25, 'epoch'
+    log_interval = 1, 'epoch'
+
+    learning_rate = extensions.LinearShift("lr", (0.001, 0), (0, int(args.epoch)))
+    learning_rate.trigger = 1, 'epoch'
+    trainer.extend(learning_rate)
+
+    # Evaluate the model with the test dataset for each epoch
+    trainer.extend(extensions.Evaluator(val_iter, model, device=args.gpu))
+
+    trainer.extend(TestModeEvaluator(val_iter, model, device=args.gpu), trigger=val_interval)
+    trainer.extend(extensions.dump_graph('main/loss'))
+    trainer.extend(extensions.snapshot(), trigger=val_interval)
+    trainer.extend(
+        extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'), trigger=val_interval)
+    # Be careful to pass the interval directly to LogReport
+    # (it determines when to emit log rather than when to read observations)
+    trainer.extend(extensions.LogReport(trigger=log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=log_interval)
+    trainer.extend(
+        extensions.PrintReport([
+            'epoch', 'iteration', 'main/loss', 'validation/main/loss', 'main/accuracy',
+            'validation/main/accuracy', 'lr'
+        ]),
+        trigger=log_interval)
+    trainer.extend(extensions.ProgressBar(update_interval=100))
+
+    # Save two plot images to the result dir
+    if extensions.PlotReport.available():
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/loss', 'validation/main/loss'], 'epoch', file_name='loss.png'))
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
+    if args.resume:
+        chainer.serializers.load_npz(args.resume, trainer)
+    trainer.run()
+    model.to_cpu()
+    serializers.save_npz(os.path.join(args.out, "model.npz"), model)
+    pickle.dump(model, open(os.path.join(args.out, "test.model.pickle"), 'wb'), -1)
+
+
+if __name__ == '__main__':
+    main()

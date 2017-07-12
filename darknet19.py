@@ -1,10 +1,10 @@
-import numpy as np
+#!/usr/bin/env python
+
 import chainer
 import chainer.links as L
 import chainer.functions as F
 from lib.utils import *
 from lib.functions import *
-import time
 
 
 class Darknet19(chainer.Chain):
@@ -17,7 +17,7 @@ class Darknet19(chainer.Chain):
     def __init__(self):
 
         super(Darknet19, self).__init__(
-            ##### common layers for both pretrained layers and yolov2 #####
+            # common layers for both pretrained layers and yolov2 #####
             conv1=L.Convolution2D(
                 3, 32, ksize=3, stride=1, pad=1, nobias=True),
             bn1=L.BatchNormalization(
@@ -109,7 +109,7 @@ class Darknet19(chainer.Chain):
                 1024, use_beta=False),
             bias18=L.Bias(shape=(1024,)),
 
-            ###### new layer
+            # new layer
             conv19=L.Convolution2D(
                 1024, 10, ksize=1, stride=1, pad=0),)
         self.train = True
@@ -154,7 +154,7 @@ class Darknet19(chainer.Chain):
         return loss
 
     def predictor(self, x):
-        ##### common layer
+        # common layer
         h = F.leaky_relu(self.bias1(self.bn1(self.conv1(x), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
         h = F.leaky_relu(self.bias2(self.bn2(self.conv2(h), test=not self.train)), slope=0.1)
@@ -179,7 +179,7 @@ class Darknet19(chainer.Chain):
         h = F.leaky_relu(self.bias17(self.bn17(self.conv17(h), test=not self.train)), slope=0.1)
         h = F.leaky_relu(self.bias18(self.bn18(self.conv18(h), test=not self.train)), slope=0.1)
 
-        ###### new layer
+        # new layer
         h = self.conv19(h)
         h = F.average_pooling_2d(h, h.data.shape[-1], stride=1, pad=0)
 
