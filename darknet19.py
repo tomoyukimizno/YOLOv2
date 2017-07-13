@@ -1,14 +1,17 @@
+#!/usr/bin/env python
+# coding=utf-8
+
 import numpy as np
-from chainer import cuda, Function, gradient_check, Variable, optimizers, serializers, utils
-from chainer import Link, Chain, ChainList
+
+import chainer
 import chainer.links as L
 import chainer.functions as F
+
 from lib.utils import *
 from lib.functions import *
-import time
 
 
-class Darknet19(Chain):
+class Darknet19(chainer.Chain):
     """
     Darknet19
     - It takes (224, 224, 3) or (448, 448, 4) sized image as input
@@ -108,86 +111,40 @@ class Darknet19(Chain):
                 1024, use_beta=False),
             bias18=L.Bias(shape=(1024, )),
 
-            ## new layer
+            # new layer
             conv19=L.Convolution2D(
                 1024, 10, ksize=1, stride=1, pad=0), )
         self.train = False
-        self.finetune = False
 
     def __call__(self, x):
         batch_size = x.data.shape[0]
 
         # common layer
-        h = F.leaky_relu(
-            self.bias1(self.bn1(self.conv1(x), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias1(self.bn1(self.conv1(x), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = F.leaky_relu(
-            self.bias2(self.bn2(self.conv2(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias2(self.bn2(self.conv2(h), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = F.leaky_relu(
-            self.bias3(self.bn3(self.conv3(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias4(self.bn4(self.conv4(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias5(self.bn5(self.conv5(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias3(self.bn3(self.conv3(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias4(self.bn4(self.conv4(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias5(self.bn5(self.conv5(h), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = F.leaky_relu(
-            self.bias6(self.bn6(self.conv6(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias7(self.bn7(self.conv7(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias8(self.bn8(self.conv8(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias6(self.bn6(self.conv6(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias7(self.bn7(self.conv7(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias8(self.bn8(self.conv8(h), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = F.leaky_relu(
-            self.bias9(self.bn9(self.conv9(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias10(self.bn10(
-                self.conv10(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias11(self.bn11(
-                self.conv11(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias12(self.bn12(
-                self.conv12(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias13(self.bn13(
-                self.conv13(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias9(self.bn9(self.conv9(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias10(self.bn10(self.conv10(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias11(self.bn11(self.conv11(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias12(self.bn12(self.conv12(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias13(self.bn13(self.conv13(h), test=not self.train)), slope=0.1)
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = F.leaky_relu(
-            self.bias14(self.bn14(
-                self.conv14(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias15(self.bn15(
-                self.conv15(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias16(self.bn16(
-                self.conv16(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias17(self.bn17(
-                self.conv17(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
-        h = F.leaky_relu(
-            self.bias18(self.bn18(
-                self.conv18(h), test=not self.train, finetune=self.finetune)),
-            slope=0.1)
+        h = F.leaky_relu(self.bias14(self.bn14(self.conv14(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias15(self.bn15(self.conv15(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias16(self.bn16(self.conv16(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias17(self.bn17(self.conv17(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias18(self.bn18(self.conv18(h), test=not self.train)), slope=0.1)
 
-        ## new layer
+        # new layer
         h = self.conv19(h)
         h = F.average_pooling_2d(h, h.data.shape[-1], stride=1, pad=0)
 
@@ -196,23 +153,27 @@ class Darknet19(Chain):
         return y
 
 
-class Darknet19Predictor(Chain):
+class Darknet19Predictor(chainer.Chain):
     def __init__(self, predictor):
         super(Darknet19Predictor, self).__init__(predictor=predictor)
 
     def __call__(self, x, t):
         y = self.predictor(x)
-
         if t.ndim == 2:  # use squared error when label is one hot label
+            print("bad")
             y = F.softmax(y)
             # loss = F.mean_squared_error(y, t)
             loss = sum_of_squared_error(y, t)
             accuracy = F.accuracy(y, t.data.argmax(axis=1).astype(np.int32))
         else:  # use softmax cross entropy when label is normal label
+            # print("good")
             loss = F.softmax_cross_entropy(y, t)
             accuracy = F.accuracy(y, t)
-
-        return y, loss, accuracy
+        chainer.report({
+            'loss': loss,
+            'accuracy': accuracy,
+        }, self)
+        return loss
 
     def predict(self, x):
         y = self.predictor(x)
