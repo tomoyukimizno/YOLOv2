@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-
+from chainer import serializers
 from darknet19 import Darknet19, Darknet19Predictor
 from yolov2 import YOLOv2, YOLOv2Predictor
 
