@@ -178,7 +178,7 @@ class YOLOv2Predictor(chainer.Chain):
         self.unstable_seen = 5000
 
     def __call__(self, input_x, t):
-        output = self.predictor(input_x)
+        output = self.predictor(input_x)  # yolo2.__call__
         batch_size, _, grid_h, grid_w = output.shape
         self.seen += batch_size
         x, y, w, h, conf, prob = F.split_axis(
