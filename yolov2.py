@@ -309,7 +309,7 @@ class YOLOv2Predictor(chainer.Chain):
                 predicted_iou = box_iou(full_truth_box, predicted_box)
                 tconf[batch, truth_n, :, truth_h, truth_w] = predicted_iou
                 conf_learning_scale[batch, truth_n, :, truth_h, truth_w] = 10.0
-
+            """
             # debug prints
             maps = F.transpose(prob[batch], (2, 3, 1, 0)).data
             print(
@@ -333,8 +333,8 @@ class YOLOv2Predictor(chainer.Chain):
                   (best_iou, predicted_iou, conf[batch][truth_n][0][truth_h][truth_w].data,
                    t[batch][0]["label"]))
             print("-------------------------------")
+            """
         print("seen = %d" % self.seen)
-
         # loss計算
         tx, ty, tw, th, tconf, tprob = Variable(tx), Variable(ty), Variable(tw), Variable(
             th), Variable(tconf), Variable(tprob)
