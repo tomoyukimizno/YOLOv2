@@ -15,12 +15,27 @@ from lib.image_generator import *
 from lib.utils import *
 from yolov2 import YOLOv2, YOLOv2Predictor
 
+parser = argparse.ArgumentParser(description='')
+# parser.add_argument('train', help='Path to training image-label list file')
+# parser.add_argument('val', help='Path to validation image-label list file')
+parser.add_argument('--batchsize', '-B', type=int, default=32, help='Learning minibatch size')
+# parser.add_argument('--epoch', '-E', type=int, default=10, help='Number of epochs to train')
+parser.add_argument(
+    '--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU')
+parser.add_argument('--initmodel', help='Initialize the model from given file')
+# parser.add_argument(
+# '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
+parser.add_argument('--out', '-o', default='backup', help='Output directory')
+# parser.add_argument('--resume', '-r', default='', help='Initialize the trainer from given file')
+parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
+# parser.add_argument(
+# '--val_batchsize', '-b', type=int, default=250, help='Validation minibatch size')
+args = parser.parse_args()
+
 # hyper parameters
 train_sizes = [320, 352, 384, 416, 448]
-initial_weight_file = "./backup2/partial.model"
-backup_path = "backup2"
-backup_file = "%s/backup.model" % (backup_path)
-batch_size = 8
+backup_file = os.path.join(args.out, "backup.model")
+batch_size = int(args.batchsize)
 max_batches = 30000
 learning_rate = 1e-5
 learning_schedules = {"0": 1e-5, "500": 1e-4, "10000": 1e-5, "20000": 1e-6}
@@ -31,27 +46,11 @@ weight_decay = 0.005
 n_classes = 10
 n_boxes = 5
 
-parser = argparse.ArgumentParser(description='')
-# parser.add_argument('train', help='Path to training image-label list file')
-# parser.add_argument('val', help='Path to validation image-label list file')
-# parser.add_argument('--batchsize', '-B', type=int, default=32, help='Learning minibatch size')
-# parser.add_argument('--epoch', '-E', type=int, default=10, help='Number of epochs to train')
-parser.add_argument(
-    '--gpu', '-g', type=int, default=-1, help='GPU ID (negative value indicates CPU')
-# parser.add_argument('--initmodel', help='Initialize the model from given file')
-# parser.add_argument(
-# '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
-# parser.add_argument('--resume', '-r', default='', help='Initialize the trainer from given file')
-parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
-# parser.add_argument(
-# '--val_batchsize', '-b', type=int, default=250, help='Validation minibatch size')
-args = parser.parse_args()
-
 # load model
 print("loading initial model...")
 yolov2 = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
 model = YOLOv2Predictor(yolov2)
-serializers.load_npz(initial_weight_file, model)
+serializers.load_npz(args.initmodel, model)
 
 model.predictor.train = True
 model.predictor.finetune = False
@@ -70,7 +69,7 @@ optimizer.setup(model)
 # start to train
 print("start training")
 root = args.root
-filename_list = list(map(lambda x: x.replace(root, ""), glob.glob(root + "*\\*")))
+filename_list = list(map(lambda x: x.replace(root, ""), glob.glob(root + "\\*")))
 
 for batch in range(max_batches):
     if str(batch) in learning_schedules:
@@ -103,12 +102,6 @@ for batch in range(max_batches):
             for i in range(len(_t)):
                 _t[i]["one_hot_label"][int(_t[i]["label"])] = 1
             t.append(_t)
-        # print(t)
-        # print(len(t))
-        # print(len(t[0]))
-        # print(x)
-        # print(x.shape)
-        # print(x.dtype)
         x = Variable(x)
         x.to_gpu()
 
@@ -125,13 +118,13 @@ for batch in range(max_batches):
 
         # save model
         if (batch + 1) % 500 == 0:
-            model_file = "%s/%s.model" % (backup_path, batch + 1)
+            model_file = os.path.join(args.out, "%s.model" % (batch + 1))
             print("saving model to %s" % (model_file))
             serializers.save_npz(model_file, model)
             serializers.save_npz(backup_file, model)
 
-print("saving model to %s/yolov2_final.model" % (backup_path))
-serializers.save_npz("%s/yolov2_final.model" % (backup_path), model)
+print("saving model to %s/yolov2_final.model" % (args.out))
+serializers.save_npz(os.path.join(args.out, "yolov2_final.model"), model)
 
 model.to_cpu()
-serializers.save_npz("%s/yolov2_final_cpu.model" % (backup_path), model)
+serializers.save_npz(os.path.join(args.out, "yolov2_final_cpu.model"), model)

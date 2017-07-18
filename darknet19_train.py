@@ -77,9 +77,10 @@ if __name__ == "__main__":
 
     # load model
     model = Darknet19Predictor(Darknet19())
-    backup_file = "%s/backup.model" % (backup_path)
-    if os.path.isfile(backup_file):
-        serializers.load_npz(backup_file, model)  # load saved model
+    backup_file = os.path.join(backup_path, "backup.model")
+    if args.initmodel:
+        print('Load model from', args.initmodel)
+        chainer.serializers.load_npz(args.initmodel, model)
     model.predictor.train = True
     model.insize = int(args.insize)
     if args.gpu >= 0:
@@ -142,4 +143,4 @@ if __name__ == "__main__":
     trainer.run()
     model.to_cpu()
     print("saving model to %s/darknet19_final.model" % (backup_path))
-    serializers.save_npz("%s/darknet19_final.model" % (backup_path), model)
+    serializers.save_npz(os.path.join(backup_path, "darknet19_448_final.model"), model)
