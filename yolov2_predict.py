@@ -14,7 +14,7 @@ class AnimalPredictor:
     def __init__(self):
         # hyper parameters
         # weight_file = "./backup/yolov2_final_cpu.model"
-        weight_file = "./backup2/backup.model"
+        weight_file = "backup.model"
         self.n_classes = 10
         self.n_boxes = 5
         self.detection_thresh = 0.3
