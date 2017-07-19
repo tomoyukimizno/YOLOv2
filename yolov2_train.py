@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 # coding=utf-8
 import argparse
-import glob
 import numpy as np
 import os
 import random
-import sys
 
 import chainer
 # from chainer import serializers, optimizers, Variable, cuda
@@ -13,23 +11,20 @@ from chainer import serializers
 from chainer import training
 from chainer.training import extensions
 
-import cv2
-
-from lib.image_generator import *
-from lib.utils import *
-from yolov2 import YOLOv2, YOLOv2Predictor
+import yolov2_updater
+from yolov2 import YOLOv2
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
-    def __init__(self, path, root, random=True):
+    def __init__(self, path, root, rand=True):
         self.imgs = chainer.datasets.ImageDataset(path, root)
         with open(path) as f:
             self.path_bboxes = list(
                 map(lambda x: os.path.join(root, "bbox", x.split(".")[0]),
                     f.read().strip().split("\n")))
             # print(self.path_bboxes)
-        self.random = random
-        self.train_sizes = [320, 352, 384, 416, 448]
+        # self.rand = rand
+        # self.train_sizes = [320, 352, 384, 416, 448]
 
     def __len__(self):
         return len(self.imgs)
@@ -37,13 +32,15 @@ class YoloDataset(chainer.dataset.DatasetMixin):
     def get_example(self, i):
         image = self.imgs[i]
         """
-        if self.random:
+        if self.rand:
             randsize = random.sample(self.train_sizes, 1)
-            image = cv2.resize(image, (*randsize, *randsize))
+            print(randsize)
+            image = image.resize(image, (randsize[0], randsize[0]))
+            print(image.shape)
         """
         image *= (1.0 / 255.0)
         data = np.loadtxt(self.path_bboxes[i], delimiter=" ")
-        return image, data[:8]  # data を同じ shape にする必要あり、今は適当な値
+        return image, data[:8]  # data を同じ行数にする必要あり、今は適当な値
         # return image, int(label), int(center_x), int(center_y), int(width), int(height)
 
 
@@ -67,33 +64,23 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # hyper parameters
-    # train_sizes = [320, 352, 384, 416, 448]
     backup_file = os.path.join(args.out, "backup.model")
-    batch_size = int(args.batchsize)
-    max_batches = 30000
-
-    lr_decay_power = 4
-    weight_decay = 0.005
+    lr_decay_power = 4  # learning_rate の減衰のさせ方がわかっていない
     n_classes = 10
     n_boxes = 5
 
     # load model
     print("loading initial model...")
-    yolov2 = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
-    model = YOLOv2Predictor(yolov2)
-    serializers.load_npz(args.initmodel, model)
-    # model.predictor.train = True  # wanna delete
-    # model.predictor.finetune = False  # wanna delete
+    model = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
+    if args.initmodel:
+        print('Load model from', args.initmodel)
+        serializers.load_npz(args.initmodel, model)
     if args.gpu >= 0:
-        chainer.cuda.get_device_from_id(args.gpu).use()  # Make the GPU current
+        chainer.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
-    else:
-        print("NEED GPU FOR TRAINING")
-        sys.exit(0)
 
     train = YoloDataset(args.train, args.root)
     val = YoloDataset(args.val, args.root)
-    # img, data = train.get_example(0)
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=args.loaderjob)
     val_iter = chainer.iterators.MultiprocessIterator(
@@ -103,10 +90,11 @@ if __name__ == "__main__":
     optimizer = chainer.optimizers.MomentumSGD(lr=1e-5, momentum=0.9)
     optimizer.use_cleargrads()
     optimizer.setup(model)
-    # optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.005), 'hook_dec')
 
     # Set up a trainer
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
+    updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
     val_interval = 25, 'epoch'

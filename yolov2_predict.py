@@ -14,7 +14,7 @@ class AnimalPredictor:
     def __init__(self):
         # hyper parameters
         # weight_file = "./backup/yolov2_final_cpu.model"
-        weight_file = "./backup2/backup.model"
+        weight_file = "backup.model"
         self.n_classes = 10
         self.n_boxes = 5
         self.detection_thresh = 0.3
@@ -25,8 +25,7 @@ class AnimalPredictor:
 
         # load model
         print("loading animal model...")
-        yolov2 = YOLOv2(n_classes=self.n_classes, n_boxes=self.n_boxes)
-        model = YOLOv2Predictor(yolov2)
+        model = YOLOv2(n_classes=self.n_classes, n_boxes=self.n_boxes)
         serializers.load_npz(weight_file, model)  # load saved model
         model.predictor.train = False
         model.predictor.finetune = False

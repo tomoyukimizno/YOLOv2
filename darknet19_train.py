@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-# coding=utf-8
-
+from __future__ import print_function
 import argparse
-import os
 import random
+import os
 
 import chainer
-from chainer import training, serializers
+from chainer import serializers
+from chainer import training
 from chainer.training import extensions
 
-from darknet19 import Darknet19, Darknet19Predictor
+import darknet19
 
 
 class PreprocessedDataset(chainer.dataset.DatasetMixin):
@@ -22,39 +22,26 @@ class PreprocessedDataset(chainer.dataset.DatasetMixin):
         return len(self.base)
 
     def get_example(self, i):
-        # It reads the i-th image/label pair and return a preprocessed image.
-        # It applies following preprocesses:
-        #     - Cropping (random or center rectangular)
-        #     - Random flip
-        #     - Scaling to [0, 1] value
         crop_size = self.crop_size
 
         image, label = self.base[i]
         _, h, w = image.shape
 
         if self.random:
-            # Randomly crop a region and flip the image
             top = random.randint(0, h - crop_size - 1)
             left = random.randint(0, w - crop_size - 1)
         else:
-            # Crop the center
             top = (h - crop_size) // 2
             left = (w - crop_size) // 2
         bottom = top + crop_size
         right = left + crop_size
 
         image = image[:, top:bottom, left:right]
-        image *= (1.0 / 255.0)  # Scale to [0, 1]
+        image *= (1.0 / 255.0)
         return image, label
 
 
-if __name__ == "__main__":
-    # hyper parameters
-    backup_path = "backup"
-    learning_rate = 0.001
-    momentum = 0.9
-    weight_decay = 0.0005
-
+def main():
     parser = argparse.ArgumentParser(description='Learning convnet from ILSVRC2012 dataset')
     parser.add_argument('train', help='Path to training image-label list file')
     parser.add_argument('val', help='Path to validation image-label list file')
@@ -66,42 +53,46 @@ if __name__ == "__main__":
     parser.add_argument(
         '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
     parser.add_argument(
-        '--mean', '-m', default='mean.npy', help='Mean file (computed by compute_mean.py)')
-    parser.add_argument(
         '--resume', '-r', default='', help='Initialize the trainer from given file')
+    parser.add_argument('--out', '-o', default='result', help='Output directory')
     parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
-    parser.add_argument('--insize', '-s', default='224', help='Model image size')
+    parser.add_argument('--insize', '-s', default='224', help='Input image height, width')
     parser.add_argument(
         '--val_batchsize', '-b', type=int, default=250, help='Validation minibatch size')
+    parser.add_argument('--test', action='store_true')
+    parser.set_defaults(test=False)
     args = parser.parse_args()
 
-    # load model
-    model = Darknet19Predictor(Darknet19())
-    backup_file = os.path.join(backup_path, "backup.model")
+    # Initialize the model to train
+    model = darknet19.Darknet19()
+    model.insize = int(args.insize)
+
     if args.initmodel:
         print('Load model from', args.initmodel)
         chainer.serializers.load_npz(args.initmodel, model)
-    model.predictor.train = True
-    model.insize = int(args.insize)
     if args.gpu >= 0:
-        chainer.cuda.get_device_from_id(args.gpu).use()  # Make the GPU current
+        chainer.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
+    # Load the datasets
     train = PreprocessedDataset(args.train, args.root, model.insize)
     val = PreprocessedDataset(args.val, args.root, model.insize, False)
+
+    # These iterators load the images with subprocesses running in parallel to
+    # the training/validation.
     train_iter = chainer.iterators.MultiprocessIterator(
         train, args.batchsize, n_processes=args.loaderjob)
     val_iter = chainer.iterators.MultiprocessIterator(
         val, args.val_batchsize, repeat=False, n_processes=args.loaderjob)
 
-    optimizer = chainer.optimizers.MomentumSGD(lr=learning_rate, momentum=momentum)
-    optimizer.use_cleargrads()
+    # Set up an optimizer
+    optimizer = chainer.optimizers.MomentumSGD(lr=0.001, momentum=0.9)
     optimizer.setup(model)
-    optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.0005), 'hook_dec')
 
     # Set up a trainer
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
-    trainer = training.Trainer(updater, (args.epoch, 'epoch'), backup_path)
+    trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
     val_interval = 25, 'epoch'
     log_interval = 1, 'epoch'
@@ -117,7 +108,6 @@ if __name__ == "__main__":
     trainer.extend(extensions.snapshot(), trigger=val_interval)
     trainer.extend(
         extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'), trigger=val_interval)
-
     # Be careful to pass the interval directly to LogReport
     # (it determines when to emit log rather than when to read observations)
     trainer.extend(extensions.LogReport(trigger=log_interval))
@@ -139,8 +129,12 @@ if __name__ == "__main__":
             extensions.PlotReport(
                 ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
     if args.resume:
-        chainer.serializers.load_npz(args.resume, trainer)
+        serializers.load_npz(args.resume, trainer)
     trainer.run()
     model.to_cpu()
-    print("saving model to %s/darknet19_final.model" % (backup_path))
-    serializers.save_npz(os.path.join(backup_path, "darknet19_448_final.model"), model)
+    serializers.save_npz(
+        os.path.join(args.out, "darknet19_$d_final.model.npz" % model.insize), model)
+
+
+if __name__ == '__main__':
+    main()
