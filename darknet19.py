@@ -20,9 +20,9 @@ def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
         b=L.Bias(shape=(out_channel, )), )
 
 
-def CRP(c, h, stride=2, pooling=False):
+def CRP(c, h, train, stride=2, pooling=False):
     # convolution -> leakyReLU -> MaxPooling
-    h = c.b(c.n(c.c(h)))
+    h = c.b(c.n(c.c(h), test=not train))
     h = F.leaky_relu(h, slope=0.1)
     if pooling:
         h = F.max_pooling_2d(h, ksize=2, stride=stride, pad=0)
@@ -70,24 +70,24 @@ class Darknet19(chainer.Chain):
 
     def __call__(self, x, t):
         # common layer
-        h = CRP(self.dark1, x, pooling=True)
-        h = CRP(self.dark2, h, pooling=True)
-        h = CRP(self.dark3, h)
-        h = CRP(self.dark4, h)
-        h = CRP(self.dark5, h, pooling=True)
-        h = CRP(self.dark6, h)
-        h = CRP(self.dark7, h)
-        h = CRP(self.dark8, h, pooling=True)
-        h = CRP(self.dark9, h)
-        h = CRP(self.dark10, h)
-        h = CRP(self.dark11, h)
-        h = CRP(self.dark12, h)
-        h = CRP(self.dark13, h, pooling=True)
-        h = CRP(self.dark14, h)
-        h = CRP(self.dark15, h)
-        h = CRP(self.dark16, h)
-        h = CRP(self.dark17, h)
-        h = CRP(self.dark18, h)
+        h = CRP(self.dark1, x, test=not self.train, pooling=True)
+        h = CRP(self.dark2, h, test=not self.train, pooling=True)
+        h = CRP(self.dark3, h, test=not self.train)
+        h = CRP(self.dark4, h, test=not self.train)
+        h = CRP(self.dark5, h, test=not self.train, pooling=True)
+        h = CRP(self.dark6, h, test=not self.train)
+        h = CRP(self.dark7, h, test=not self.train)
+        h = CRP(self.dark8, h, test=not self.train, pooling=True)
+        h = CRP(self.dark9, h, test=not self.train)
+        h = CRP(self.dark10, h, test=not self.train)
+        h = CRP(self.dark11, h, test=not self.train)
+        h = CRP(self.dark12, h, test=not self.train)
+        h = CRP(self.dark13, h, test=not self.train, pooling=True)
+        h = CRP(self.dark14, h, test=not self.train)
+        h = CRP(self.dark15, h, test=not self.train)
+        h = CRP(self.dark16, h, test=not self.train)
+        h = CRP(self.dark17, h, test=not self.train)
+        h = CRP(self.dark18, h, test=not self.train)
 
         # new layer
         h = self.conv19(h)
