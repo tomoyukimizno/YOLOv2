@@ -118,14 +118,17 @@ class YOLOv2(chainer.Chain):
         prob = F.softmax(prob)  # probablitiyのacitivation
 
         # 教師データの用意
-        tw = np.zeros(pw.shape, dtype=np.float32)  # wとhが0になるように学習(e^wとe^hは1に近づく -> 担当するbboxの倍率1)
+        # wとhが0になるように学習(e^wとe^hは1に近づく -> 担当するbboxの倍率1)
+        # 活性化後のxとyが0.5になるように学習()
+        tw = np.zeros(pw.shape, dtype=np.float32)
         th = np.zeros(ph.shape, dtype=np.float32)
-        tx = np.tile(0.5, px.shape).astype(np.float32)  # 活性化後のxとyが0.5になるように学習()
+        tx = np.tile(0.5, px.shape).astype(np.float32)
         ty = np.tile(0.5, py.shape).astype(np.float32)
-        tconf = np.zeros(
-            pconf.shape, dtype=np.float32
-        )  # confidenceのtruthは基本0、iouがthresh以上のものは学習しない、ただしobjectの存在するgridのbest_boxのみ真のIOUに近づかせる
-        tprob = prob.data.copy()  # best_anchor以外は学習させない(自身との二乗和誤差 = 0)
+        # confidenceのtruthは基本0、iouがthresh以上のものは学習しない
+        # ただしobjectの存在するgridのbest_boxのみ真のIOUに近づかせる
+        tconf = np.zeros(pconf.shape, dtype=np.float32)
+        # best_anchor以外は学習させない(自身との二乗和誤差 = 0)
+        tprob = prob.data.copy()
         """
         if self.seen < self.unstable_seen:  # centerの存在しないbbox誤差学習スケールは基本0.1
             box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
@@ -257,7 +260,7 @@ class YOLOv2(chainer.Chain):
     def init_anchor(self, anchors):
         self.anchors = anchors
 
-    def predict(self, input_x):
+    def predictor(self, input_x):
         output = self.predictor(input_x)
         batch_size, input_channel, input_h, input_w = input_x.shape
         batch_size, _, grid_h, grid_w = output.shape

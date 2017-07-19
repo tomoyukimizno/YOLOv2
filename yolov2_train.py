@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
     # Set up a trainer
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
-    updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
+    # updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
     val_interval = 25, 'epoch'
