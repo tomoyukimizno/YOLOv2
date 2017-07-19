@@ -22,7 +22,7 @@ def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
 
 def CRP(c, h, stride=2, pooling=False):
     # convolution -> leakyReLU -> MaxPooling
-    h = c.b(c.n(c.c(h), test=True))
+    h = c.b(c.n(c.c(h)))
     h = F.leaky_relu(h, slope=0.1)
     if pooling:
         h = F.max_pooling_2d(h, ksize=2, stride=stride, pad=0)
@@ -42,25 +42,25 @@ class Darknet19(chainer.Chain):
             dark2=darknetConv2D(None, 64),
             dark3=darknetConv2D(None, 128),
             dark4=darknetConv2D(
-                None, 64, ksize=1),
+                None, 64, ksize=1, pad=0),
             dark5=darknetConv2D(None, 128),
             dark6=darknetConv2D(None, 256),
             dark7=darknetConv2D(
-                None, 128, ksize=1),
+                None, 128, ksize=1, pad=0),
             dark8=darknetConv2D(None, 256),
             dark9=darknetConv2D(None, 512),
             dark10=darknetConv2D(
-                None, 256, ksize=1),
+                None, 256, ksize=1, pad=0),
             dark11=darknetConv2D(None, 512),
             dark12=darknetConv2D(
-                None, 256, ksize=1),
+                None, 256, ksize=1, pad=0),
             dark13=darknetConv2D(None, 512),
             dark14=darknetConv2D(None, 1024),
             dark15=darknetConv2D(
-                None, 512, ksize=1),
+                None, 512, ksize=1, pad=0),
             dark16=darknetConv2D(None, 1024),
             dark17=darknetConv2D(
-                None, 512, ksize=1),
+                None, 512, ksize=1, pad=0),
             dark18=darknetConv2D(None, 1024),
 
             # new layer

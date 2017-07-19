@@ -4,13 +4,12 @@ from chainer import Variable
 import chainer.links as L
 import chainer.functions as F
 from lib.utils import Box, box_iou, multi_box_iou
-from lib.functions import reorg
 
 
-def darknetConv2D(in_channel, out_channel, ksize=3):
+def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
     return chainer.Chain(
         c=L.Convolution2D(
-            in_channel, out_channel, ksize=ksize, stride=1, pad=1, nobias=True),
+            in_channel, out_channel, ksize=ksize, stride=1, pad=pad, nobias=True),
         n=L.BatchNormalization(
             out_channel, use_beta=False),
         b=L.Bias(shape=(out_channel, )), )
@@ -18,11 +17,25 @@ def darknetConv2D(in_channel, out_channel, ksize=3):
 
 def CRP(c, h, stride=2, pooling=False):
     # convolution -> leakyReLU -> MaxPooling
-    h = c.b(c.n(c.c(h), test=True))
+    h = c.b(c.n(c.c(h)))
     h = F.leaky_relu(h, slope=0.1)
     if pooling:
         h = F.max_pooling_2d(h, ksize=2, stride=stride, pad=0)
     return h
+
+
+def reorg(h, stride=2):
+    batch_size, input_channel, input_height, input_width = h.shape
+    output_height, output_width = input_height // stride, input_width // stride
+    output_channel = input_channel * (stride**2)
+    output = F.transpose(
+        F.reshape(h, (batch_size, input_channel, output_height, stride, output_width, stride)),
+        (0, 1, 2, 4, 3, 5))
+    output = F.transpose(
+        F.reshape(output, (batch_size, input_channel, output_height, output_width, -1)),
+        (0, 4, 1, 2, 3))
+    output = F.reshape(output, (batch_size, output_channel, output_height, output_width))
+    return output
 
 
 class YOLOv2(chainer.Chain):
@@ -38,25 +51,25 @@ class YOLOv2(chainer.Chain):
             dark2=darknetConv2D(None, 64),
             dark3=darknetConv2D(None, 128),
             dark4=darknetConv2D(
-                None, 64, ksize=1),
+                None, 64, ksize=1, pad=0),
             dark5=darknetConv2D(None, 128),
             dark6=darknetConv2D(None, 256),
             dark7=darknetConv2D(
-                None, 128, ksize=1),
+                None, 128, ksize=1, pad=0),
             dark8=darknetConv2D(None, 256),
             dark9=darknetConv2D(None, 512),
             dark10=darknetConv2D(
-                None, 256, ksize=1),
+                None, 256, ksize=1, pad=0),
             dark11=darknetConv2D(None, 512),
             dark12=darknetConv2D(
-                None, 256, ksize=1),
+                None, 256, ksize=1, pad=0),
             dark13=darknetConv2D(None, 512),
             dark14=darknetConv2D(None, 1024),
             dark15=darknetConv2D(
-                None, 512, ksize=1),
+                None, 512, ksize=1, pad=0),
             dark16=darknetConv2D(None, 1024),
             dark17=darknetConv2D(
-                None, 512, ksize=1),
+                None, 512, ksize=1, pad=0),
             dark18=darknetConv2D(None, 1024),
 
             # new layer
@@ -64,7 +77,7 @@ class YOLOv2(chainer.Chain):
             dark20=darknetConv2D(None, 1024),
             dark21=darknetConv2D(None, 1024),
             conv22=L.Convolution2D(
-                None, n_boxes * (5 + n_classes), ksize=1, stride=1, pad=1, nobias=True),
+                None, n_boxes * (5 + n_classes), ksize=1, stride=1, pad=0, nobias=True),
             bias22=L.Bias(shape=(n_boxes * (5 + n_classes), )), )
         self.train = True
         self.n_boxes = n_boxes
@@ -134,7 +147,7 @@ class YOLOv2(chainer.Chain):
             box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
         else:
             box_learning_scale = np.tile(0, px.shape).astype(np.float32)
-        """
+        # """
         box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
         conf_learning_scale = np.tile(0.1, pconf.shape).astype(np.float32)
 
@@ -188,10 +201,12 @@ class YOLOv2(chainer.Chain):
             ious = np.array(ious)
             best_ious.append(np.max(ious, axis=0))
         best_ious = np.array(best_ious)
-
-        # 一定以上のiouを持つanchorに対しては、confを0に下げないようにする(truthの周りのgridはconfをそのまま維持)。
+        """
+        # 一定以上のiouを持つanchorに対しては、confを0に下げないようにする
+        # (truthの周りのgridはconfをそのまま維持)。
         tconf[best_ious > self.thresh] = pconf.data[best_ious > self.thresh]
         conf_learning_scale[best_ious > self.thresh] = 0
+        """
 
         # objectの存在するanchor boxのみ、x、y、w、h、conf、probを個別修正
         abs_anchors = self.anchors / np.array([grid_w, grid_h])
@@ -256,6 +271,9 @@ class YOLOv2(chainer.Chain):
         # chainer.report({'loss': loss}, self)
 
         return loss
+
+    def make_teaching_data(self):
+        pass
 
     def init_anchor(self, anchors):
         self.anchors = anchors

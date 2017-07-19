@@ -11,7 +11,6 @@ from chainer import serializers
 from chainer import training
 from chainer.training import extensions
 
-import yolov2_updater
 from yolov2 import YOLOv2
 
 
