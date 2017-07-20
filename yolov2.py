@@ -3,7 +3,6 @@ import chainer
 from chainer import Variable
 import chainer.links as L
 import chainer.functions as F
-from lib.utils import Box, box_iou, multi_box_iou
 
 
 def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
@@ -15,9 +14,9 @@ def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
         b=L.Bias(shape=(out_channel, )), )
 
 
-def CRP(c, h, stride=2, pooling=False):
+def CRP(c, h, train, stride=2, pooling=False):
     # convolution -> leakyReLU -> MaxPooling
-    h = c.b(c.n(c.c(h), test=True))
+    h = c.b(c.n(c.c(h), test=not train))
     h = F.leaky_relu(h, slope=0.1)
     if pooling:
         h = F.max_pooling_2d(h, ksize=2, stride=stride, pad=0)
@@ -36,6 +35,34 @@ def reorg(h, stride=2):
         (0, 4, 1, 2, 3))
     output = F.reshape(output, (batch_size, output_channel, output_height, output_width))
     return output
+
+
+def multi_overlap(x1, len1, x2, len2):
+    len1_half = len1 / 2
+    len2_half = len2 / 2
+
+    left = F.maximum(x1 - len1_half, x2 - len2_half)
+    right = F.minimum(x1 + len1_half, x2 + len2_half)
+
+    return right - left
+
+
+def multi_box_intersection(a_x, a_y, a_w, a_h, b_x, b_y, b_w, b_h):
+    w = multi_overlap(a_x, a_w, b_x, b_w)
+    h = multi_overlap(a_y, a_h, b_y, b_h)
+    zeros = Variable(np.zeros(w.shape, dtype=np.float32))
+    zeros.to_gpu()
+
+    w = F.maximum(w, zeros)
+    h = F.maximum(h, zeros)
+
+    area = w * h
+    return area
+
+
+def multi_box_iou(a_x, a_y, a_w, a_h, b_x, b_y, b_w, b_h):
+    i = multi_box_intersection(a_x, a_y, a_w, a_h, b_x, b_y, b_w, b_h)
+    return i / (a_w * a_h + b_w * b_h - i)
 
 
 class YOLOv2(chainer.Chain):
@@ -82,65 +109,84 @@ class YOLOv2(chainer.Chain):
         self.train = True
         self.n_boxes = n_boxes
         self.n_classes = n_classes
-        self.anchors = [[5.375, 5.03125], [5.40625, 4.6875], [2.96875, 2.53125],
-                        [2.59375, 2.78125], [1.9375, 3.25]]
+        self.anchors = np.array(
+            [[5.375, 5.03125], [5.40625, 4.6875], [2.96875, 2.53125], [2.59375, 2.78125],
+             [1.9375, 3.25]],
+            dtype=np.float32)
         self.thresh = 0.6
         self.seen = 0
         self.unstable_seen = 5000
 
     def __call__(self, x, t):
         # common layer
-        h = CRP(self.dark1, x, test=not self.train, pooling=True)
-        h = CRP(self.dark2, h, test=not self.train, pooling=True)
-        h = CRP(self.dark3, h, test=not self.train)
-        h = CRP(self.dark4, h, test=not self.train)
-        h = CRP(self.dark5, h, test=not self.train, pooling=True)
-        h = CRP(self.dark6, h, test=not self.train)
-        h = CRP(self.dark7, h, test=not self.train)
-        h = CRP(self.dark8, h, test=not self.train, pooling=True)
-        h = CRP(self.dark9, h, test=not self.train)
-        h = CRP(self.dark10, h, test=not self.train)
-        h = CRP(self.dark11, h, test=not self.train)
-        h = CRP(self.dark12, h, test=not self.train)
-        h = CRP(self.dark13, h, test=not self.train)
+        h = CRP(self.dark1, x, train=self.train, pooling=True)
+        h = CRP(self.dark2, h, train=self.train, pooling=True)
+        h = CRP(self.dark3, h, train=self.train)
+        h = CRP(self.dark4, h, train=self.train)
+        h = CRP(self.dark5, h, train=self.train, pooling=True)
+        h = CRP(self.dark6, h, train=self.train)
+        h = CRP(self.dark7, h, train=self.train)
+        h = CRP(self.dark8, h, train=self.train, pooling=True)
+        h = CRP(self.dark9, h, train=self.train)
+        h = CRP(self.dark10, h, train=self.train)
+        h = CRP(self.dark11, h, train=self.train)
+        h = CRP(self.dark12, h, train=self.train)
+        h = CRP(self.dark13, h, train=self.train)
         high_resolution_feature = reorg(h)  # 高解像度特徴量をreorgでサイズ落として保存しておく
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
-        h = CRP(self.dark14, h, test=not self.train)
-        h = CRP(self.dark15, h, test=not self.train)
-        h = CRP(self.dark16, h, test=not self.train)
-        h = CRP(self.dark17, h, test=not self.train)
-        h = CRP(self.dark18, h, test=not self.train)
+        h = CRP(self.dark14, h, train=self.train)
+        h = CRP(self.dark15, h, train=self.train)
+        h = CRP(self.dark16, h, train=self.train)
+        h = CRP(self.dark17, h, train=self.train)
+        h = CRP(self.dark18, h, train=self.train)
 
         # new layer
-        h = CRP(self.dark19, h, test=not self.train)
-        h = CRP(self.dark20, h, test=not self.train)
+        h = CRP(self.dark19, h, train=self.train)
+        h = CRP(self.dark20, h, train=self.train)
         h = F.concat((high_resolution_feature, h), axis=1)  # output concatnation
-        h = CRP(self.dark21, h, test=not self.train)
+        h = CRP(self.dark21, h, train=self.train)
         h = self.bias22(self.conv22(h))
 
         batch_size, _, grid_h, grid_w = h.shape
+        _, num_data, _ = t.shape  # batch_size,num_data, (label,x,y,w,h)
+        # 要検証: int を GPU に送ったほうが早くなる可能性
+        # batch_size.to_gpu, grid_h.to_gpu, grid_w.to_gpu, num_data.to_gpu
         self.seen += batch_size
         px, py, pw, ph, pconf, prob = F.split_axis(
             F.reshape(h, (batch_size, self.n_boxes, self.n_classes + 5, grid_h, grid_w)),
             (1, 2, 3, 4, 5),
             axis=2)
-        px = F.sigmoid(px)  # xのactivation
-        py = F.sigmoid(py)  # yのactivation
-        pconf = F.sigmoid(pconf)  # confのactivation
+        # px = F.sigmoid(px)  # xのactivation
+        # py = F.sigmoid(py)  # yのactivation
+        # pconf = F.sigmoid(pconf)  # confのactivation
         prob = F.transpose(prob, (0, 2, 1, 3, 4))
-        prob = F.softmax(prob)  # probablitiyのacitivation
+        # prob = F.softmax(prob)  # probablitiyのacitivation
+        px = F.sigmoid(F.reshape(px, (batch_size, -1)))
+        py = F.sigmoid(F.reshape(py, (batch_size, -1)))
+        pw = F.sigmoid(F.reshape(pw, (batch_size, -1)))
+        ph = F.sigmoid(F.reshape(ph, (batch_size, -1)))
+        pconf = F.sigmoid(F.reshape(pconf, (batch_size, -1)))
+        prob = F.sigmoid(F.reshape(prob, (batch_size, self.n_classes, -1)))
 
         # 教師データの用意
         # wとhが0になるように学習(e^wとe^hは1に近づく -> 担当するbboxの倍率1)
         # 活性化後のxとyが0.5になるように学習()
+        """
         tw = np.zeros(pw.shape, dtype=np.float32)
         th = np.zeros(ph.shape, dtype=np.float32)
         tx = np.tile(0.5, px.shape).astype(np.float32)
         ty = np.tile(0.5, py.shape).astype(np.float32)
+        """
+        tw = F.tile(np.array(0, dtype=np.float32), pw.shape)
+        th = F.tile(np.array(0, dtype=np.float32), ph.shape)
+        tx = F.tile(np.array(0.5, dtype=np.float32), px.shape)
+        ty = F.tile(np.array(0.5, dtype=np.float32), py.shape)
+
         # confidenceのtruthは基本0、iouがthresh以上のものは学習しない
         # ただしobjectの存在するgridのbest_boxのみ真のIOUに近づかせる
-        tconf = np.zeros(pconf.shape, dtype=np.float32)
+        # tconf = np.zeros(pconf.shape, dtype=np.float32)
         # best_anchor以外は学習させない(自身との二乗和誤差 = 0)
+        tconf = F.tile(np.array(0, dtype=np.float32), pconf.shape)
         tprob = prob.data.copy()
         """
         if self.seen < self.unstable_seen:  # centerの存在しないbbox誤差学習スケールは基本0.1
@@ -152,55 +198,55 @@ class YOLOv2(chainer.Chain):
         conf_learning_scale = np.tile(0.1, pconf.shape).astype(np.float32)
 
         # 全bboxとtruthのiouを計算(batch単位で計算する)
-        x_shift = Variable(np.broadcast_to(np.arange(grid_w, dtype=np.float32), px.shape[1:]))
-        y_shift = Variable(
-            np.broadcast_to(
+        """
+        x_shift = F.broadcast_to(np.arange(grid_w, dtype=np.float32), px.shape[1:])
+        y_shift = F.broadcast_to(
+            F.reshape(
                 np.arange(
-                    grid_h, dtype=np.float32).reshape(grid_h, 1), py.shape[1:]))
-        w_anchor = Variable(
-            np.broadcast_to(
-                np.reshape(
-                    np.array(
-                        self.anchors, dtype=np.float32)[:, 0], (self.n_boxes, 1, 1, 1)),
-                pw.shape[1:]))
-        h_anchor = Variable(
-            np.broadcast_to(
-                np.reshape(
-                    np.array(
-                        self.anchors, dtype=np.float32)[:, 1], (self.n_boxes, 1, 1, 1)),
-                ph.shape[1:]))
+                    grid_h, dtype=np.float32), (grid_h, 1)), py.shape[1:])
+        w_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1, 1)), pw.shape[1:])
+        h_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1, 1)), ph.shape[1:])
+        """
+        x_shift = F.broadcast_to(np.arange(px.shape[-1], dtype=np.float32) % grid_w, px.shape)
+        y_shift = F.broadcast_to(np.arange(py.shape[-1], dtype=np.float32) // grid_h, py.shape)
+        w_anchor = F.reshape(
+            F.broadcast_to(
+                F.expand_dims(
+                    self.anchors[:, 0], axis=1), (batch_size, self.n_boxes, grid_h * grid_w)),
+            pw.shape)
+        h_anchor = F.reshape(
+            F.broadcast_to(
+                F.expand_dims(
+                    self.anchors[:, 1], axis=1), (batch_size, self.n_boxes, grid_h * grid_w)),
+            pw.shape)
         x_shift.to_gpu(), y_shift.to_gpu(), w_anchor.to_gpu(), h_anchor.to_gpu()
         best_ious = []
         tt = chainer.cuda.to_cpu(t.data)
-        n_truth_boxes = tt[0].shape[0]
-        for batch in range(batch_size):
-            box_x = (px[batch] + x_shift) / grid_w
-            box_y = (py[batch] + y_shift) / grid_h
-            box_w = F.exp(pw[batch]) * w_anchor / grid_w
-            box_h = F.exp(ph[batch]) * h_anchor / grid_h
-            ious = []
-            for truth_index in range(n_truth_boxes):
-                truth_box_x = Variable(
-                    np.full(
-                        box_x.shape, tt[batch, truth_index, 1], dtype=np.float32))
-                truth_box_y = Variable(
-                    np.full(
-                        box_x.shape, tt[batch, truth_index, 2], dtype=np.float32))
-                truth_box_w = Variable(
-                    np.full(
-                        box_x.shape, tt[batch, truth_index, 3], dtype=np.float32))
-                truth_box_h = Variable(
-                    np.full(
-                        box_x.shape, tt[batch, truth_index, 4], dtype=np.float32))
-                truth_box_x.to_gpu(), truth_box_y.to_gpu(), truth_box_w.to_gpu(
-                ), truth_box_h.to_gpu()
-                ious.append(
-                    multi_box_iou(
-                        Box(box_x, box_y, box_w, box_h),
-                        Box(truth_box_x, truth_box_y, truth_box_w, truth_box_h)).data.get())
-            ious = np.array(ious)
-            best_ious.append(np.max(ious, axis=0))
-        best_ious = np.array(best_ious)
+        # n_truth_boxes = tt[0].shape[0]
+        truth_box_x, truth_box_y, truth_box_w, truth_box_h, = F.separate(
+            F.broadcast_to(
+                F.expand_dims(
+                    t[:, :, 1:], axis=3), (batch_size, num_data, 4, px.shape[-1])),
+            axis=2)
+        truth_box_x.to_gpu(), truth_box_y.to_gpu(), truth_box_w.to_gpu(), truth_box_h.to_gpu()
+        truth_box_x = F.swapaxes(truth_box_x, 0, 1)
+        truth_box_y = F.swapaxes(truth_box_y, 0, 1)
+        truth_box_w = F.swapaxes(truth_box_w, 0, 1)
+        truth_box_h = F.swapaxes(truth_box_h, 0, 1)
+        box_x = F.broadcast_to((px + x_shift) / grid_w, (num_data, *px.shape))
+        box_y = F.broadcast_to((py + y_shift) / grid_h, (num_data, *py.shape))
+        box_w = F.broadcast_to(F.exp(pw) * w_anchor / grid_w, (num_data, *pw.shape))
+        box_h = F.broadcast_to(F.exp(ph) * h_anchor / grid_h, (num_data, *ph.shape))
+        box_x.to_gpu(), box_y.to_gpu(), box_w.to_gpu(), box_h.to_gpu()
+
+        for _tbx, _tby, _tbw, _tbh, in zip(truth_box_x, truth_box_y, truth_box_w, truth_box_h):
+            ious = multi_box_iou(box_x, box_y, box_w, box_h, _tbx, _tby, _tbw, _tbh)
+
+            # best_ious.append(np.max(ious, axis=0))
+        # best_ious = np.array(best_ious)
+        best_ious = F.max(ious, axis=0)
         """
         # 一定以上のiouを持つanchorに対しては、confを0に下げないようにする
         # (truthの周りのgridはconfをそのまま維持)。
