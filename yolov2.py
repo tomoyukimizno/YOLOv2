@@ -23,20 +23,6 @@ def CRP(c, h, train, stride=2, pooling=False):
     return h
 
 
-def reorg(h, stride=2):
-    batch_size, input_channel, input_height, input_width = h.shape
-    output_height, output_width = input_height // stride, input_width // stride
-    output_channel = input_channel * (stride**2)
-    output = F.transpose(
-        F.reshape(h, (batch_size, input_channel, output_height, stride, output_width, stride)),
-        (0, 1, 2, 4, 3, 5))
-    output = F.transpose(
-        F.reshape(output, (batch_size, input_channel, output_height, output_width, -1)),
-        (0, 4, 1, 2, 3))
-    output = F.reshape(output, (batch_size, output_channel, output_height, output_width))
-    return output
-
-
 def multi_overlap(x1, len1, x2, len2):
     len1_half = len1 / 2
     len2_half = len2 / 2
@@ -132,7 +118,7 @@ class YOLOv2(chainer.Chain):
         h = CRP(self.dark11, h, train=self.train)
         h = CRP(self.dark12, h, train=self.train)
         h = CRP(self.dark13, h, train=self.train)
-        high_resolution_feature = reorg(h)  # 高解像度特徴量をreorgでサイズ落として保存しておく
+        high_resolution_feature = F.space2depth(h, 2)  # 高解像度特徴量をreorgでサイズ落として保存しておく
         h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
         h = CRP(self.dark14, h, train=self.train)
         h = CRP(self.dark15, h, train=self.train)
@@ -171,12 +157,6 @@ class YOLOv2(chainer.Chain):
         # 教師データの用意
         # wとhが0になるように学習(e^wとe^hは1に近づく -> 担当するbboxの倍率1)
         # 活性化後のxとyが0.5になるように学習()
-        """
-        tw = np.zeros(pw.shape, dtype=np.float32)
-        th = np.zeros(ph.shape, dtype=np.float32)
-        tx = np.tile(0.5, px.shape).astype(np.float32)
-        ty = np.tile(0.5, py.shape).astype(np.float32)
-        """
         tw = F.tile(np.array(0, dtype=np.float32), pw.shape)
         th = F.tile(np.array(0, dtype=np.float32), ph.shape)
         tx = F.tile(np.array(0.5, dtype=np.float32), px.shape)
@@ -188,27 +168,18 @@ class YOLOv2(chainer.Chain):
         # best_anchor以外は学習させない(自身との二乗和誤差 = 0)
         tconf = F.tile(np.array(0, dtype=np.float32), pconf.shape)
         tprob = prob.data.copy()
+        tconf.to_gpu()
         """
         if self.seen < self.unstable_seen:  # centerの存在しないbbox誤差学習スケールは基本0.1
             box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
         else:
             box_learning_scale = np.tile(0, px.shape).astype(np.float32)
         # """
-        box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
-        conf_learning_scale = np.tile(0.1, pconf.shape).astype(np.float32)
+        box_learning_scale = F.tile(np.array(0.1, dtype=np.float32), px.shape)
+        conf_learning_scale = F.tile(np.array(0.1, dtype=np.float32), pconf.shape)
+        conf_learning_scale.to_gpu()
 
         # 全bboxとtruthのiouを計算(batch単位で計算する)
-        """
-        x_shift = F.broadcast_to(np.arange(grid_w, dtype=np.float32), px.shape[1:])
-        y_shift = F.broadcast_to(
-            F.reshape(
-                np.arange(
-                    grid_h, dtype=np.float32), (grid_h, 1)), py.shape[1:])
-        w_anchor = F.broadcast_to(
-            F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1, 1)), pw.shape[1:])
-        h_anchor = F.broadcast_to(
-            F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1, 1)), ph.shape[1:])
-        """
         x_shift = F.broadcast_to(np.arange(px.shape[-1], dtype=np.float32) % grid_w, px.shape)
         y_shift = F.broadcast_to(np.arange(py.shape[-1], dtype=np.float32) // grid_h, py.shape)
         w_anchor = F.reshape(
@@ -222,7 +193,6 @@ class YOLOv2(chainer.Chain):
                     self.anchors[:, 1], axis=1), (batch_size, self.n_boxes, grid_h * grid_w)),
             pw.shape)
         x_shift.to_gpu(), y_shift.to_gpu(), w_anchor.to_gpu(), h_anchor.to_gpu()
-        best_ious = []
         tt = chainer.cuda.to_cpu(t.data)
         # n_truth_boxes = tt[0].shape[0]
         truth_box_x, truth_box_y, truth_box_w, truth_box_h, = F.separate(
@@ -241,36 +211,44 @@ class YOLOv2(chainer.Chain):
         box_h = F.broadcast_to(F.exp(ph) * h_anchor / grid_h, (num_data, *ph.shape))
         box_x.to_gpu(), box_y.to_gpu(), box_w.to_gpu(), box_h.to_gpu()
 
-        for _tbx, _tby, _tbw, _tbh, in zip(truth_box_x, truth_box_y, truth_box_w, truth_box_h):
-            ious = multi_box_iou(box_x, box_y, box_w, box_h, _tbx, _tby, _tbw, _tbh)
-
-            # best_ious.append(np.max(ious, axis=0))
-        # best_ious = np.array(best_ious)
-        best_ious = F.max(ious, axis=0)
-        """
+        best_ious = F.max(multi_box_iou(box_x, box_y, box_w, box_h, truth_box_x, truth_box_y,
+                                        truth_box_w, truth_box_h),
+                          axis=0)
+        best_ious.to_gpu()
+        # """
         # 一定以上のiouを持つanchorに対しては、confを0に下げないようにする
         # (truthの周りのgridはconfをそのまま維持)。
-        tconf[best_ious > self.thresh] = pconf.data[best_ious > self.thresh]
-        conf_learning_scale[best_ious > self.thresh] = 0
-        """
+
+        # 右辺では tconf をゼロ行列として利用することでステップ関数を作っている
+        # 一定以上のiouを持つanchorに対しては、confを0に下げないようにする
+        # truthの周りのgridはconfをそのまま維持
+        conf_learning_scale *= F.ceil(F.maximum(self.thresh - best_ious, tconf))
+        tconf = F.ceil(F.maximum(best_ious - self.thresh, tconf)) * pconf * best_ious
 
         # objectの存在するanchor boxのみ、x、y、w、h、conf、probを個別修正
-        abs_anchors = self.anchors / np.array([grid_w, grid_h])
+        abs_anchors = (self.anchors / np.array([grid_w, grid_h])).astype(np.float32)
+        lable, center_x, center_y, width, height = F.separate(t, axis=2)
+        np.zeros(tx.shape, dtype=np.float32)
+        ex_w = F.broadcast_to(width, (len(self.anchors), *width.shape))
+        ex_h = F.broadcast_to(height, (len(self.anchors), *height.shape))
+        ex_aw = F.broadcast_to(
+            F.reshape(abs_anchors[:, 0], (len(self.anchors), 1, 1)),
+            (len(self.anchors), *width.shape))
+        ex_ah = F.broadcast_to(
+            F.reshape(abs_anchors[:, 1], (len(self.anchors), 1, 1)),
+            (len(self.anchors), *height.shape))
+        zeros = F.tile(np.array(0, dtype=np.float32), ex_w.shape)
+        ex_w.to_gpu(), ex_h.to_gpu(), ex_aw.to_gpu(), ex_ah.to_gpu(), zeros.to_gpu()
+        truth_n = F.argmax(
+            multi_box_iou(zeros, zeros, ex_w, ex_h, zeros, zeros, ex_aw, ex_ah), axis=0)
+        """ここから"""
         for batch in range(batch_size):
             for truth_box in tt[batch]:
                 truth_w = int(truth_box[1] * grid_w)
                 truth_h = int(truth_box[2] * grid_h)
-                truth_n = 0
-                best_iou = 0.0
-                for anchor_index, abs_anchor in enumerate(abs_anchors):
-                    iou = box_iou(
-                        Box(0, 0, truth_box[3], truth_box[4]),
-                        Box(0, 0, abs_anchor[0], abs_anchor[1]))
-                    if best_iou < iou:
-                        best_iou = iou
-                        truth_n = anchor_index
 
-                # objectの存在するanchorについて、centerを0.5ではなく、真の座標に近づかせる。anchorのスケールを1ではなく真のスケールに近づかせる。学習スケールを1にする。
+                # objectの存在するanchorについて、centerを0.5ではなく、真の座標に近づかせる。
+                # anchorのスケールを1ではなく真のスケールに近づかせる。学習スケールを1にする。
                 box_learning_scale[batch, truth_n, :, truth_h, truth_w] = 1.0
                 tx[batch, truth_n, :, truth_h, truth_w] = truth_box[1] * grid_w - truth_w
                 ty[batch, truth_n, :, truth_h, truth_w] = truth_box[2] * grid_h - truth_h
