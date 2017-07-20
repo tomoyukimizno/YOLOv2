@@ -1,14 +1,9 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-import numpy as np
-
 import chainer
 import chainer.links as L
 import chainer.functions as F
-
-from lib.utils import *
-from lib.functions import *
 
 
 def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
@@ -70,24 +65,24 @@ class Darknet19(chainer.Chain):
 
     def __call__(self, x, t):
         # common layer
-        h = CRP(self.dark1, x, test=not self.train, pooling=True)
-        h = CRP(self.dark2, h, test=not self.train, pooling=True)
-        h = CRP(self.dark3, h, test=not self.train)
-        h = CRP(self.dark4, h, test=not self.train)
-        h = CRP(self.dark5, h, test=not self.train, pooling=True)
-        h = CRP(self.dark6, h, test=not self.train)
-        h = CRP(self.dark7, h, test=not self.train)
-        h = CRP(self.dark8, h, test=not self.train, pooling=True)
-        h = CRP(self.dark9, h, test=not self.train)
-        h = CRP(self.dark10, h, test=not self.train)
-        h = CRP(self.dark11, h, test=not self.train)
-        h = CRP(self.dark12, h, test=not self.train)
-        h = CRP(self.dark13, h, test=not self.train, pooling=True)
-        h = CRP(self.dark14, h, test=not self.train)
-        h = CRP(self.dark15, h, test=not self.train)
-        h = CRP(self.dark16, h, test=not self.train)
-        h = CRP(self.dark17, h, test=not self.train)
-        h = CRP(self.dark18, h, test=not self.train)
+        h = CRP(self.dark1, x, train=self.train, pooling=True)
+        h = CRP(self.dark2, h, train=self.train, pooling=True)
+        h = CRP(self.dark3, h, train=self.train)
+        h = CRP(self.dark4, h, train=self.train)
+        h = CRP(self.dark5, h, train=self.train, pooling=True)
+        h = CRP(self.dark6, h, train=self.train)
+        h = CRP(self.dark7, h, train=self.train)
+        h = CRP(self.dark8, h, train=self.train, pooling=True)
+        h = CRP(self.dark9, h, train=self.train)
+        h = CRP(self.dark10, h, train=self.train)
+        h = CRP(self.dark11, h, train=self.train)
+        h = CRP(self.dark12, h, train=self.train)
+        h = CRP(self.dark13, h, train=self.train, pooling=True)
+        h = CRP(self.dark14, h, train=self.train)
+        h = CRP(self.dark15, h, train=self.train)
+        h = CRP(self.dark16, h, train=self.train)
+        h = CRP(self.dark17, h, train=self.train)
+        h = CRP(self.dark18, h, train=self.train)
 
         # new layer
         h = self.conv19(h)

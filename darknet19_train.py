@@ -133,7 +133,7 @@ def main():
     trainer.run()
     model.to_cpu()
     serializers.save_npz(
-        os.path.join(args.out, "darknet19_$d_final.model.npz" % model.insize), model)
+        os.path.join(args.out, "darknet19_%d_final.model.npz" % model.insize), model)
 
 
 if __name__ == '__main__':

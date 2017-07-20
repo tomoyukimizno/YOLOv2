@@ -6,7 +6,7 @@ import os
 import random
 
 import chainer
-# from chainer import serializers, optimizers, Variable, cuda
+# from chainer import functions as F
 from chainer import serializers
 from chainer import training
 from chainer.training import extensions
@@ -30,15 +30,22 @@ class YoloDataset(chainer.dataset.DatasetMixin):
 
     def get_example(self, i):
         image = self.imgs[i]
+        # ここに書くのはおかしい(Epoch単位で固定が必要)
+        # 多分 updater に書くのが良い
         """
+        # print(image.shape)
+        c, h, w = image.shape
         if self.rand:
-            randsize = random.sample(self.train_sizes, 1)
-            print(randsize)
-            image = image.resize(image, (randsize[0], randsize[0]))
-            print(image.shape)
-        """
+            randsize = random.sample(self.train_sizes, 1)[0]
+            # print(randsize)
+            image = F.expand_dims(image, axis=0)
+            # print(image.shape)
+            image = F.resize_images(image, (randsize, randsize))
+            # print(image.shape)
+            image = image[0]
+        # """
         image *= (1.0 / 255.0)
-        data = np.loadtxt(self.path_bboxes[i], delimiter=" ")
+        data = np.loadtxt(self.path_bboxes[i], delimiter=" ", dtype=np.float32)
         return image, data[:8]  # data を同じ行数にする必要あり、今は適当な値
         # return image, int(label), int(center_x), int(center_y), int(width), int(height)
 
