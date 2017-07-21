@@ -11,6 +11,7 @@ from chainer import serializers
 from chainer import training
 from chainer.training import extensions
 
+from darknet19 import Darknet19
 from yolov2 import YOLOv2
 
 
@@ -50,6 +51,18 @@ class YoloDataset(chainer.dataset.DatasetMixin):
         # return image, int(label), int(center_x), int(center_y), int(width), int(height)
 
 
+def copy_layer(src, dst, max_num):
+    for i in range(1, max_num + 1):
+        src_layer = eval("src.dark%d" % i)
+        dst_layer = eval("dst.dark%d" % i)
+        # copy conv
+        dst_layer.c = src_layer.c
+        # copy bn
+        dst_layer.n = src_layer.n
+        # copy bias
+        dst_layer.b = src_layer.b
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('train', help='Path to training image-label list file')
@@ -80,7 +93,10 @@ if __name__ == "__main__":
     model = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
     if args.initmodel:
         print('Load model from', args.initmodel)
-        serializers.load_npz(args.initmodel, model)
+        darknet = Darknet19()
+        serializers.load_npz(args.initmodel, darknet)  # load saved model
+        copy_layer(darknet, model, 18)
+
     if args.gpu >= 0:
         chainer.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
