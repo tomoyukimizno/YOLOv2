@@ -32,7 +32,7 @@ class YoloDataset(chainer.dataset.DatasetMixin):
     def get_example(self, i):
         image = self.imgs[i]
         # ここに書くのはおかしい(Epoch単位で固定が必要)
-        # 多分 updater に書くのが良い
+        # 多分 updater/trainer に書くのが良い
         """
         # print(image.shape)
         c, h, w = image.shape

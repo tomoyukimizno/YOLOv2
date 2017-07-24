@@ -136,6 +136,8 @@ class YOLOv2(chainer.Chain):
 
         batch_size, _, grid_h, grid_w = h.shape
         _, num_data, _ = t.shape  # batch_size,num_data, (label,x,y,w,h)
+
+        # ネットワーク出力の整形
         px, py, pw, ph, pconf, prob = F.split_axis(
             F.reshape(h, (batch_size, self.n_boxes, self.n_classes + 5, grid_h, grid_w)),
             (1, 2, 3, 4, 5),
@@ -223,11 +225,21 @@ class YOLOv2(chainer.Chain):
         change_index = tn * grid_h * grid_w + F.cast(index_y, np.int32) * grid_h + F.cast(index_x,
                                                                                           np.int32)
         change_index.to_cpu()
+        index_x.to_cpu(), index_y.to_cpu()
         change_index = [[index[0], int(change_index[index].data)]
                         for index in np.ndindex(batch_size, num_data)]
         change_matrix = np.zeros(px.shape, dtype=np.float32)
+        change_x = np.zeros(px.shape, dtype=np.float32)
+        change_y = np.zeros(py.shape, dtype=np.float32)
+        change_w = np.zeros(pw.shape, dtype=np.float32)
+        change_h = np.zeros(ph.shape, dtype=np.float32)
+
         for index in change_index:
             change_matrix[index[0], index[1]] = 1
+            change_x[index[0], index[1]] = index_x.data - truth_w
+            change_y[index[0], index[1]] = 1
+            change_w[index[0], index[1]] = 1
+            change_h[index[0], index[1]] = 1
         change_matrix = Variable(change_matrix)
         change_matrix.to_gpu()
         ones = F.tile(np.array(1.0, dtype=np.float32), box_learning_scale.shape)
