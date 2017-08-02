@@ -47,7 +47,7 @@ class YoloDataset(chainer.dataset.DatasetMixin):
         # """
         image *= (1.0 / 255.0)
         data = np.loadtxt(self.path_bboxes[i], delimiter=" ", dtype=np.float32)
-        return image, data[:8]  # data を同じ行数にする必要あり、今は適当な値
+        return image, data[:4]  # data を同じ行数にする必要あり、今は適当な値
         # return image, int(label), int(center_x), int(center_y), int(width), int(height)
 
 
@@ -119,8 +119,8 @@ if __name__ == "__main__":
     # updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
-    val_interval = 25, 'epoch'
-    log_interval = 1, 'epoch'
+    val_interval = 500, 'epoch'
+    log_interval = 100, 'epoch'
 
     learning_rate = extensions.LinearShift("lr", (1e-5, 1e-4), (500 - 2, 500 - 1))
     learning_rate = extensions.LinearShift("lr", (1e-4, 1e-5), (10000 - 2, 10000 - 1))
@@ -131,7 +131,27 @@ if __name__ == "__main__":
     trainer.extend(extensions.snapshot(), trigger=val_interval)
     trainer.extend(
         extensions.snapshot_object(model, 'model_iter_{.updater.iteration}'), trigger=val_interval)
+
+    trainer.extend(extensions.LogReport(trigger=log_interval))
+    trainer.extend(extensions.observe_lr(), trigger=log_interval)
+    trainer.extend(
+        extensions.PrintReport([
+            'epoch', 'iteration', 'main/loss', 'validation/main/loss', 'main/accuracy',
+            'validation/main/accuracy', 'lr'
+        ]),
+        trigger=log_interval)
     trainer.extend(extensions.ProgressBar(update_interval=100))
+
+    if extensions.PlotReport.available():
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/loss', 'validation/main/loss'], 'epoch', file_name='loss.png'))
+        trainer.extend(
+            extensions.PlotReport(
+                ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
+    if args.resume:
+        chainer.serializers.load_npz(args.resume, trainer)
+
     trainer.run()
 
     print("saving model to %s/yolov2_final.model" % (args.out))
