@@ -326,6 +326,7 @@ class YOLOv2(chainer.Chain):
         loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_prob
 
         chainer.report({
+            'loss': loss.data,
             'loss_x': loss_x.data,
             'loss_y': loss_y.data,
             'loss_w': loss_w.data,

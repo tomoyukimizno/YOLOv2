@@ -9,10 +9,24 @@ import chainer
 # from chainer import functions as F
 from chainer import serializers
 from chainer import training
+from chainer.dataset.convert import concat_examples
 from chainer.training import extensions
 
 from darknet19 import Darknet19
 from yolov2 import YOLOv2
+"""
+def myConverter(batch, device=None, padding=None):
+    newBatch = []
+    for dat in batch:
+        x = dat[0]  # xはint32のPIL画像
+        y = dat[1]
+        img = Image.fromarray(x.transpose(1, 2, 0), "RGB")
+        img = img.resize((277, 277), Image.ANTIALIAS)
+        imarray = np.asarray(img).transpose(2, 0, 1).astype(np.float32) / 255.
+        newBatch.append((imarray, index))
+        # concat_examplesで、通常のバッチに対する処理を追加
+        return concat_examples(buf, device=device, padding=padding)
+"""
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
@@ -47,7 +61,8 @@ class YoloDataset(chainer.dataset.DatasetMixin):
         # """
         image *= (1.0 / 255.0)
         data = np.loadtxt(self.path_bboxes[i], delimiter=" ", dtype=np.float32)
-        return image, data[:4]  # data を同じ行数にする必要あり、今は適当な値
+        return image, data  # data を同じ行数にする必要あり、今は適当な値
+        # return image, chainer.Variable(data)  # data を同じ行数にする必要あり、今は適当な値
         # return image, int(label), int(center_x), int(center_y), int(width), int(height)
 
 
@@ -90,6 +105,10 @@ if __name__ == "__main__":
 
     # load model
     print("loading initial model...")
+    if args.gpu >= 0:
+        chainer.cuda.get_device_from_id(args.gpu).use()
+        # cupy.cuda.Device(args.gpu).use()
+
     model = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
     if args.initmodel:
         print('Load model from', args.initmodel)
@@ -98,7 +117,6 @@ if __name__ == "__main__":
         copy_layer(darknet, model, 18)
 
     if args.gpu >= 0:
-        chainer.cuda.get_device_from_id(args.gpu).use()
         model.to_gpu()
 
     train = YoloDataset(args.train, args.root)
