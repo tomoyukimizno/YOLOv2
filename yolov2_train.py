@@ -14,19 +14,10 @@ from chainer.training import extensions
 
 from darknet19 import Darknet19
 from yolov2 import YOLOv2
-"""
-def myConverter(batch, device=None, padding=None):
-    newBatch = []
-    for dat in batch:
-        x = dat[0]  # xはint32のPIL画像
-        y = dat[1]
-        img = Image.fromarray(x.transpose(1, 2, 0), "RGB")
-        img = img.resize((277, 277), Image.ANTIALIAS)
-        imarray = np.asarray(img).transpose(2, 0, 1).astype(np.float32) / 255.
-        newBatch.append((imarray, index))
-        # concat_examplesで、通常のバッチに対する処理を追加
-        return concat_examples(buf, device=device, padding=padding)
-"""
+
+
+def my_converter(batch, device=None):
+    return concat_examples(batch, device=device, padding=-1)
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
@@ -133,7 +124,8 @@ if __name__ == "__main__":
     optimizer.add_hook(chainer.optimizer.WeightDecay(0.005), 'hook_dec')
 
     # Set up a trainer
-    updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
+    updater = training.StandardUpdater(
+        train_iter, optimizer, device=args.gpu, converter=my_converter)
     # updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
@@ -154,8 +146,8 @@ if __name__ == "__main__":
     trainer.extend(extensions.observe_lr(), trigger=log_interval)
     trainer.extend(
         extensions.PrintReport([
-            'epoch', 'iteration', 'main/loss', 'validation/main/loss', 'main/accuracy',
-            'validation/main/accuracy', 'lr'
+            'epoch', 'iteration', 'main/loss', 'main/loss_x', 'main/loss_y', 'main/loss_w',
+            'main/loss_h', 'main/loss_conf', 'lr'
         ]),
         trigger=log_interval)
     trainer.extend(extensions.ProgressBar(update_interval=100))
@@ -163,10 +155,9 @@ if __name__ == "__main__":
     if extensions.PlotReport.available():
         trainer.extend(
             extensions.PlotReport(
-                ['main/loss', 'validation/main/loss'], 'epoch', file_name='loss.png'))
-        trainer.extend(
-            extensions.PlotReport(
-                ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
+                ['main/loss_x', 'main/loss_y', 'main/loss_w', 'main/loss_h', 'main/loss_conf'],
+                'epoch',
+                file_name='loss.png'))
     if args.resume:
         chainer.serializers.load_npz(args.resume, trainer)
 

@@ -90,12 +90,6 @@ class YOLOv2(chainer.Chain):
         self.train = True
         self.n_boxes = n_boxes
         self.n_classes = n_classes
-        """
-        self.anchors = np.array(
-            [[5.375, 5.03125], [5.40625, 4.6875], [2.96875, 2.53125], [2.59375, 2.78125],
-             [1.9375, 3.25]],
-            dtype=np.float32)
-        """
         self.anchors = cupy.array(
             [[5.375, 5.03125], [5.40625, 4.6875], [2.96875, 2.53125], [2.59375, 2.78125],
              [1.9375, 3.25]],
@@ -267,13 +261,15 @@ class YOLOv2(chainer.Chain):
             w_pred_extract[index] = w_pred[batch, anchor, y_index, x_index].data
             h_pred_extract[index] = h_pred[batch, anchor, y_index, x_index].data
             conf_pred_extract[index] = conf_pred[batch, anchor, y_index, x_index].data
+            # padding 箇所はlearning rateを0にして無害化
             box_learning_scale_extract[index] = box_learning_scale[batch, anchor, y_index,
-                                                                   x_index].data
+                                                                   x_index].data if l >= 0 else 0
             conf_learning_scale_extract[index] = conf_learning_scale[batch, anchor, y_index,
-                                                                     x_index].data
+                                                                     x_index].data if l >= 0 else 0
             w_anchor[index] = abs_anchors[anchor][0]
             h_anchor[index] = abs_anchors[anchor][1]
-            prob[batch, l, anchor, y_index, x_index] = 1
+            prob[batch, l, anchor, y_index, x_index] = 1 if l >= 0 else prob_pred[
+                batch, l, anchor, y_index, x_index].data
         x_pred_extract = Variable(x_pred_extract)
         y_pred_extract = Variable(y_pred_extract)
         w_pred_extract = Variable(w_pred_extract)
@@ -295,10 +291,8 @@ class YOLOv2(chainer.Chain):
         loss_h -= F.sum(F.square(h_pred_extract) * box_learning_scale_extract) / 2
         loss_conf -= F.sum(F.square(conf_pred_extract) * conf_learning_scale_extract) / 2
         # 真の位置のlearning rateを設定
-        box_learning_scale = F.tile(cupy.array(1.0, dtype=cupy.float32), center_x.shape)
-        conf_learning_scale = F.tile(cupy.array(10, dtype=cupy.float32), center_x.shape)
-        box_learning_scale.to_gpu()
-        conf_learning_scale.to_gpu()
+        box_learning_scale = F.ceil(box_learning_scale_extract)
+        conf_learning_scale = F.ceil(box_learning_scale_extract) * 10
         # オブジェクトのある位置のlossを足し上げる
         center_x_grid = center_x * grid_w
         center_y_grid = center_y * grid_h
