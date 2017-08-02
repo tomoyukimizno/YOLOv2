@@ -244,17 +244,17 @@ class YOLOv2(chainer.Chain):
         w_pred_extract = cupy.zeros(width.shape, dtype=cupy.float32)
         h_pred_extract = cupy.zeros(height.shape, dtype=cupy.float32)
         conf_pred_extract = cupy.zeros(height.shape, dtype=cupy.float32)
+        prob_pred_extract = cupy.zeros((*center_x.shape, self.n_classes), dtype=cupy.float32)
         box_learning_scale_extract = cupy.zeros(center_x.shape, dtype=cupy.float32)
         conf_learning_scale_extract = cupy.zeros(center_x.shape, dtype=cupy.float32)
         w_anchor = cupy.zeros(width.shape, dtype=cupy.float32)
         h_anchor = cupy.zeros(height.shape, dtype=cupy.float32)
-        prob = cupy.zeros(
-            (n_batch, self.n_classes, self.n_boxes, grid_h, grid_w), dtype=cupy.float32)
+        prob = cupy.zeros(prob_pred_extract.shape, dtype=cupy.float32)
         for index in np.ndindex(n_batch, n_data):
             batch = index[0]
             anchor = int(anchor_index[index].data)
-            x_index = int(center_x[index].data * grid_w)
-            y_index = int(center_y[index].data * grid_h)
+            x_index = min(int(center_x[index].data * grid_w), grid_w - 1)
+            y_index = min(int(center_y[index].data * grid_h), grid_h - 1)
             l = int(label[index].data)
             x_pred_extract[index] = x_pred[batch, anchor, y_index, x_index].data
             y_pred_extract[index] = y_pred[batch, anchor, y_index, x_index].data
@@ -263,30 +263,37 @@ class YOLOv2(chainer.Chain):
             conf_pred_extract[index] = conf_pred[batch, anchor, y_index, x_index].data
             # padding 箇所はlearning rateを0にして無害化
             box_learning_scale_extract[index] = box_learning_scale[batch, anchor, y_index,
-                                                                   x_index].data if l >= 0 else 0
-            conf_learning_scale_extract[index] = conf_learning_scale[batch, anchor, y_index,
-                                                                     x_index].data if l >= 0 else 0
+                                                                   x_index].data if l < 100 else 0
+            conf_learning_scale_extract[index] = conf_learning_scale[
+                batch, anchor, y_index, x_index].data if l < 100 else 0
             w_anchor[index] = abs_anchors[anchor][0]
             h_anchor[index] = abs_anchors[anchor][1]
-            prob[batch, l, anchor, y_index, x_index] = 1 if l >= 0 else prob_pred[
-                batch, l, anchor, y_index, x_index].data
+            prob_pred_extract[index] = prob_pred[batch, :, anchor, y_index, x_index].data
+            if l < 100:
+                prob[(*index, l)] = 1
+            else:
+                prob[index] = prob_pred_extract[index]
         x_pred_extract = Variable(x_pred_extract)
         y_pred_extract = Variable(y_pred_extract)
         w_pred_extract = Variable(w_pred_extract)
         h_pred_extract = Variable(h_pred_extract)
         conf_pred_extract = Variable(conf_pred_extract)
+        prob_pred_extract = Variable(prob_pred_extract)
         box_learning_scale_extract = Variable(box_learning_scale_extract)
         conf_learning_scale_extract = Variable(conf_learning_scale_extract)
         w_anchor = Variable(w_anchor)
         h_anchor = Variable(h_anchor)
         prob = Variable(prob)
         x_pred_extract.to_gpu(), y_pred_extract.to_gpu()
-        w_pred_extract.to_gpu(), h_pred_extract.to_gpu(), conf_pred_extract.to_gpu()
+        w_pred_extract.to_gpu(), h_pred_extract.to_gpu()
+        conf_pred_extract.to_gpu(), prob_pred_extract.to_gpu()
         box_learning_scale_extract.to_gpu(), conf_learning_scale_extract.to_gpu()
         w_anchor.to_gpu(), h_anchor.to_gpu(), prob.to_gpu()
         # 余分に足した分を引く
-        loss_x -= F.sum(F.square(x_pred_extract - comma_5s) * box_learning_scale_extract) / 2
-        loss_y -= F.sum(F.square(y_pred_extract - comma_5s) * box_learning_scale_extract) / 2
+        loss_x -= F.sum(
+            F.squared_difference(x_pred_extract, comma_5s) * box_learning_scale_extract) / 2
+        loss_y -= F.sum(
+            F.squared_difference(y_pred_extract, comma_5s) * box_learning_scale_extract) / 2
         loss_w -= F.sum(F.square(w_pred_extract) * box_learning_scale_extract) / 2
         loss_h -= F.sum(F.square(h_pred_extract) * box_learning_scale_extract) / 2
         loss_conf -= F.sum(F.square(conf_pred_extract) * conf_learning_scale_extract) / 2
@@ -299,20 +306,24 @@ class YOLOv2(chainer.Chain):
         center_x_shift = F.floor(center_x_grid)
         center_y_shift = F.floor(center_y_grid)
         loss_x += F.sum(
-            F.square(center_x_grid - center_x_shift - x_pred_extract) * box_learning_scale) / 2
+            F.squared_difference(center_x_grid - center_x_shift, x_pred_extract) *
+            box_learning_scale) / 2
         loss_y += F.sum(
-            F.square(center_y_grid - center_y_shift - y_pred_extract) * box_learning_scale) / 2
+            F.squared_difference(center_y_grid - center_y_shift, y_pred_extract) *
+            box_learning_scale) / 2
         loss_w += F.sum(
-            F.square(F.log(width) - F.log(w_anchor) - w_pred_extract) * box_learning_scale) / 2
+            F.squared_difference(F.log(width) - F.log(w_anchor), w_pred_extract) *
+            box_learning_scale) / 2
         loss_h += F.sum(
-            F.square(F.log(height) - F.log(h_anchor) - h_pred_extract) * box_learning_scale) / 2
+            F.squared_difference(F.log(height) - F.log(h_anchor), h_pred_extract) *
+            box_learning_scale) / 2
         loss_conf += F.sum(
-            F.square(
+            F.squared_difference(
                 multi_box_iou(center_x, center_y, width, height, (x_pred_extract + center_x_shift)
                               / grid_w, (y_pred_extract + center_y_shift) / grid_h,
-                              F.exp(w_pred_extract) * w_anchor, F.exp(h_pred_extract) * h_anchor) -
+                              F.exp(w_pred_extract) * w_anchor, F.exp(h_pred_extract) * h_anchor),
                 conf_pred_extract) * conf_learning_scale) / 2
-        loss_prob = F.sum(F.square(prob - prob_pred)) / 2
+        loss_prob = F.sum(F.squared_difference(prob, prob_pred_extract)) / 2
         """
         print("loss_x: %f  loss_y: %f  loss_w: %f  loss_h: %f  loss_conf: %f   loss_prob: %f" %
               (loss_x.data, loss_y.data, loss_w.data, loss_h.data, loss_conf.data, loss_prob.data))

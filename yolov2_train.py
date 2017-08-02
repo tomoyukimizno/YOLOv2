@@ -17,7 +17,7 @@ from yolov2 import YOLOv2
 
 
 def my_converter(batch, device=None):
-    return concat_examples(batch, device=device, padding=-1)
+    return concat_examples(batch, device=device, padding=100)
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
