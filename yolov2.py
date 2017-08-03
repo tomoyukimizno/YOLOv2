@@ -34,9 +34,7 @@ def multi_overlap(x1, len1, x2, len2):
 def multi_box_intersection(a_x, a_y, a_w, a_h, b_x, b_y, b_w, b_h):
     w = multi_overlap(a_x, a_w, b_x, b_w)
     h = multi_overlap(a_y, a_h, b_y, b_h)
-    # zeros = Variable(np.zeros(w.shape, dtype=np.float32))
     zeros = Variable(cupy.zeros(w.shape, dtype=cupy.float32))
-    zeros.to_gpu()
 
     return F.maximum(w, zeros) * F.maximum(h, zeros)
 
@@ -95,8 +93,6 @@ class YOLOv2(chainer.Chain):
              [1.9375, 3.25]],
             dtype=cupy.float32)
         self.thresh = 0.6
-        self.seen = 0
-        self.unstable_seen = 5000
 
     def __call__(self, x, t):
         # ネットワーク出力の計算
@@ -129,39 +125,16 @@ class YOLOv2(chainer.Chain):
         h = self.bias22(self.conv22(h))
 
         n_batch, _, grid_h, grid_w = h.shape
-        _, n_data, _ = t.shape  # n_batch,n_data, (label,x,y,w,h)
+        _, n_data, _ = t.shape  # n_batch, n_data, (label,x,y,w,h)
 
         # NW出力の整形
-        """
-        # 問題なければこっちの記述に切り替えたい
-        t_pred, conf_pred, prob = F.split_axis(
-            F.reshape(h, (n_batch, self.n_boxes, self.n_classes + 5, grid_h, grid_w)), (4, 5),
-            axis=2)
-        t_pred = F.sigmoid(t_pred)
-        """
-        x_pred, y_pred, w_pred, h_pred, conf_pred, prob_pred = F.split_axis(
-            F.reshape(h, (n_batch, self.n_boxes, self.n_classes + 5, grid_h, grid_w)),
-            (1, 2, 3, 4, 5),
-            axis=2)
-        x_pred = F.sigmoid(F.squeeze(x_pred))  # n_batch, n_class, grid_w, grid_h
-        y_pred = F.sigmoid(F.squeeze(y_pred))  # n_batch, n_class, grid_w, grid_h
-        w_pred = F.sigmoid(F.squeeze(w_pred))  # n_batch, n_class, grid_w, grid_h
-        h_pred = F.sigmoid(F.squeeze(h_pred))  # n_batch, n_class, grid_w, grid_h
-        conf_pred = F.sigmoid(F.squeeze(conf_pred))  # n_batch, n_class, grid_w, grid_h
+        pred, prob_pred = F.split_axis(
+            F.reshape(h, (n_batch, self.n_boxes, self.n_classes + 5, grid_h, grid_w)), [5], axis=2)
+        x_pred, y_pred, w_pred, h_pred, conf_pred = F.separate(F.sigmoid(pred), axis=2)
         prob_pred = F.sigmoid(F.transpose(prob_pred, (0, 2, 1, 3, 4)))
-
-        self.seen += n_batch
-        """
-        if self.seen < self.unstable_seen:  # centerの存在しないbbox誤差学習スケールは基本0.1
-            box_learning_scale = np.tile(0.1, px.shape).astype(np.float32)
-        else:
-            box_learning_scale = np.tile(0, px.shape).astype(np.float32)
-        # """
         # learning lateの初期化
         box_learning_scale = F.tile(cupy.array(0.1, dtype=cupy.float32), conf_pred.shape)
         conf_learning_scale = F.tile(cupy.array(0.1, dtype=cupy.float32), conf_pred.shape)
-        box_learning_scale.to_gpu()
-        conf_learning_scale.to_gpu()
 
         # 真の値の整形
         label, center_x, center_y, width, height = F.separate(t, axis=2)
@@ -174,18 +147,11 @@ class YOLOv2(chainer.Chain):
             F.reshape(abs_anchors[:, 0], (self.n_boxes, 1, 1)), (self.n_boxes, *width.shape))
         ex_ah = F.broadcast_to(
             F.reshape(abs_anchors[:, 1], (self.n_boxes, 1, 1)), (self.n_boxes, *height.shape))
-        zeros = F.tile(cupy.array(0, dtype=cupy.float32), ex_w.shape)
-        ex_aw.to_gpu(), ex_ah.to_gpu(), zeros.to_gpu()
+        intersection = F.minimum(ex_w, ex_aw) * F.minimum(ex_h, ex_ah)
         anchor_index = F.argmax(
-            multi_box_iou(zeros, zeros, ex_w, ex_h, zeros, zeros, ex_aw, ex_ah), axis=0)
+            intersection / (ex_w * ex_h + ex_aw * ex_ah - intersection), axis=0)
 
         # objectの予測位置を算出
-        """
-        x_shift = F.broadcast_to(np.arange(grid_w, dtype=np.float32), x_pred.shape)
-        y_shift = F.broadcast_to(
-            np.arange(
-                grid_h, dtype=np.float32).reshape(grid_h, 1), y_pred.shape)
-        """
         x_shift = F.broadcast_to(cupy.arange(grid_w, dtype=cupy.float32), x_pred.shape)
         y_shift = F.broadcast_to(
             cupy.arange(
@@ -194,7 +160,6 @@ class YOLOv2(chainer.Chain):
             F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1)), w_pred.shape)
         h_anchor = F.broadcast_to(
             F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1)), h_pred.shape)
-        x_shift.to_gpu(), y_shift.to_gpu(), w_anchor.to_gpu(), h_anchor.to_gpu()
         box_x = F.broadcast_to((x_pred + x_shift) / grid_w, (n_data, *x_pred.shape))
         box_y = F.broadcast_to((y_pred + y_shift) / grid_h, (n_data, *y_pred.shape))
         box_w = F.broadcast_to(F.exp(w_pred) * w_anchor / grid_w, (n_data, *w_pred.shape))
@@ -221,74 +186,71 @@ class YOLOv2(chainer.Chain):
         # (truthの周りのgridはconfをそのまま維持)。
         # (効率的?に計算するため右辺ではゼロ行列を利用してステップ関数を作っている)
         zeros = F.tile(cupy.array(0, dtype=cupy.float32), x_pred.shape)
-        zeros.to_gpu()
         conf_learning_scale *= F.ceil(F.maximum(self.thresh - best_ious, zeros))
         conf = F.ceil(F.maximum(best_ious - self.thresh, zeros)) * conf_pred * best_ious
-        conf.to_gpu()
 
         # オブジェクトのない位置のloss計算
         comma_5s = F.tile(cupy.array(0.5, dtype=cupy.float32), x_pred.shape)
-        comma_5s.to_gpu()
-        loss_x = F.sum(F.square(x_pred - comma_5s) * box_learning_scale) / 2
-        loss_y = F.sum(F.square(y_pred - comma_5s) * box_learning_scale) / 2
+        loss_x = F.sum(F.squared_difference(x_pred, comma_5s) * box_learning_scale) / 2
+        loss_y = F.sum(F.squared_difference(y_pred, comma_5s) * box_learning_scale) / 2
         loss_w = F.sum(F.square(w_pred) * box_learning_scale) / 2
         loss_h = F.sum(F.square(h_pred) * box_learning_scale) / 2
-        loss_conf = F.sum(F.square(conf_pred - conf) * conf_learning_scale) / 2
+        loss_conf = F.sum(F.squared_difference(conf_pred, conf) * conf_learning_scale) / 2
         # loss_prob = 0 # オブジェクトのない位置は学習しない
 
         # オブジェクトのある位置のloss計算
         comma_5s = F.tile(cupy.array(0.5, dtype=cupy.float32), center_x.shape)
-        comma_5s.to_gpu()
-        x_pred_extract = cupy.zeros(center_x.shape, dtype=cupy.float32)
-        y_pred_extract = cupy.zeros(center_y.shape, dtype=cupy.float32)
-        w_pred_extract = cupy.zeros(width.shape, dtype=cupy.float32)
-        h_pred_extract = cupy.zeros(height.shape, dtype=cupy.float32)
-        conf_pred_extract = cupy.zeros(height.shape, dtype=cupy.float32)
-        prob_pred_extract = cupy.zeros((*center_x.shape, self.n_classes), dtype=cupy.float32)
-        box_learning_scale_extract = cupy.zeros(center_x.shape, dtype=cupy.float32)
-        conf_learning_scale_extract = cupy.zeros(center_x.shape, dtype=cupy.float32)
-        w_anchor = cupy.zeros(width.shape, dtype=cupy.float32)
-        h_anchor = cupy.zeros(height.shape, dtype=cupy.float32)
-        prob = cupy.zeros(prob_pred_extract.shape, dtype=cupy.float32)
-        for index in np.ndindex(n_batch, n_data):
-            batch = index[0]
-            anchor = int(anchor_index[index].data)
-            x_index = min(int(center_x[index].data * grid_w), grid_w - 1)
-            y_index = min(int(center_y[index].data * grid_h), grid_h - 1)
-            l = int(label[index].data)
-            x_pred_extract[index] = x_pred[batch, anchor, y_index, x_index].data
-            y_pred_extract[index] = y_pred[batch, anchor, y_index, x_index].data
-            w_pred_extract[index] = w_pred[batch, anchor, y_index, x_index].data
-            h_pred_extract[index] = h_pred[batch, anchor, y_index, x_index].data
-            conf_pred_extract[index] = conf_pred[batch, anchor, y_index, x_index].data
-            # padding 箇所はlearning rateを0にして無害化
-            box_learning_scale_extract[index] = box_learning_scale[batch, anchor, y_index,
-                                                                   x_index].data if l < 100 else 0
-            conf_learning_scale_extract[index] = conf_learning_scale[
-                batch, anchor, y_index, x_index].data if l < 100 else 0
-            w_anchor[index] = abs_anchors[anchor][0]
-            h_anchor[index] = abs_anchors[anchor][1]
-            prob_pred_extract[index] = prob_pred[batch, :, anchor, y_index, x_index].data
-            if l < 100:
-                prob[(*index, l)] = 1
-            else:
-                prob[index] = prob_pred_extract[index]
-        x_pred_extract = Variable(x_pred_extract)
-        y_pred_extract = Variable(y_pred_extract)
-        w_pred_extract = Variable(w_pred_extract)
-        h_pred_extract = Variable(h_pred_extract)
-        conf_pred_extract = Variable(conf_pred_extract)
-        prob_pred_extract = Variable(prob_pred_extract)
-        box_learning_scale_extract = Variable(box_learning_scale_extract)
-        conf_learning_scale_extract = Variable(conf_learning_scale_extract)
-        w_anchor = Variable(w_anchor)
-        h_anchor = Variable(h_anchor)
-        prob = Variable(prob)
-        x_pred_extract.to_gpu(), y_pred_extract.to_gpu()
-        w_pred_extract.to_gpu(), h_pred_extract.to_gpu()
-        conf_pred_extract.to_gpu(), prob_pred_extract.to_gpu()
-        box_learning_scale_extract.to_gpu(), conf_learning_scale_extract.to_gpu()
-        w_anchor.to_gpu(), h_anchor.to_gpu(), prob.to_gpu()
+        batch = [index[0] for index in np.ndindex(n_batch, n_data)]
+        anchor = [int(anchor_index[index].data) for index in np.ndindex(n_batch, n_data)]
+        x_index = [
+            min(int(center_x[index].data * grid_w), grid_w - 1)
+            for index in np.ndindex(n_batch, n_data)
+        ]
+        y_index = [
+            min(int(center_y[index].data * grid_h), grid_h - 1)
+            for index in np.ndindex(n_batch, n_data)
+        ]
+        l = [int(label[index].data) for index in np.ndindex(n_batch, n_data)]
+        x_pred_extract = F.reshape(
+            cupy.array(x_pred[batch, anchor, y_index, x_index].data), center_x.shape)
+        y_pred_extract = F.reshape(
+            cupy.array(y_pred[batch, anchor, y_index, x_index].data), center_y.shape)
+        w_pred_extract = F.reshape(
+            cupy.array(w_pred[batch, anchor, y_index, x_index].data), width.shape)
+        h_pred_extract = F.reshape(
+            cupy.array(h_pred[batch, anchor, y_index, x_index].data), height.shape)
+        conf_pred_extract = F.reshape(
+            cupy.array(conf_pred[batch, anchor, y_index, x_index].data), center_x.shape)
+        # padding 箇所はlearning rateを0にして無害化
+        box_learning_scale_extract = F.reshape(
+            cupy.array(box_learning_scale[batch, anchor, y_index, x_index].data),
+            width.shape) * F.ceil(1 + width)
+        conf_learning_scale_extract = F.reshape(
+            cupy.array(conf_learning_scale[batch, anchor, y_index, x_index].data),
+            height.shape) * F.ceil(1 + height)
+        w_anchor = F.reshape(abs_anchors[anchor][:, 0], width.shape)
+        h_anchor = F.reshape(abs_anchors[anchor][:, 1], height.shape)
+
+        prob_pred_extract = F.reshape(prob_pred[batch, :, anchor, y_index, x_index].data,
+                                      (*center_x.shape, self.n_classes))
+        one_hots = cupy.zeros(prob_pred_extract.shape, dtype=cupy.float32)
+        one_hots[batch, [index[1] for index in np.ndindex(n_batch, n_data)], l] = 1
+        # prob  = px + (1-p)y
+        # p:(label が -1(paddingしたところ) が 1, 他は0) を broadcast
+        # x: prob_pred_extract (paddingの箇所は loss が 0 になるように設定)
+        # y: 1-of-K vector (真の重み)
+        prob = F.linear_interpolate(
+            F.broadcast_to(
+                Variable(
+                    cupy.reshape(
+                        cupy.maximum(
+                            -cupy.array(
+                                l, dtype=cupy.float32),
+                            cupy.zeros(
+                                len(l), dtype=cupy.float32)), (*center_x.shape, 1))),
+                prob_pred_extract.shape),
+            prob_pred_extract,
+            F.reshape(Variable(one_hots), prob_pred_extract.shape))
         # 余分に足した分を引く
         loss_x -= F.sum(
             F.squared_difference(x_pred_extract, comma_5s) * box_learning_scale_extract) / 2
@@ -298,7 +260,9 @@ class YOLOv2(chainer.Chain):
         loss_h -= F.sum(F.square(h_pred_extract) * box_learning_scale_extract) / 2
         loss_conf -= F.sum(F.square(conf_pred_extract) * conf_learning_scale_extract) / 2
         # 真の位置のlearning rateを設定
+        # 1 にする
         box_learning_scale = F.ceil(box_learning_scale_extract)
+        # 10 にする(元論文では5)
         conf_learning_scale = F.ceil(box_learning_scale_extract) * 10
         # オブジェクトのある位置のlossを足し上げる
         center_x_grid = center_x * grid_w
@@ -312,11 +276,13 @@ class YOLOv2(chainer.Chain):
             F.squared_difference(center_y_grid - center_y_shift, y_pred_extract) *
             box_learning_scale) / 2
         loss_w += F.sum(
-            F.squared_difference(F.log(width) - F.log(w_anchor), w_pred_extract) *
-            box_learning_scale) / 2
+            F.squared_difference(
+                F.log(F.maximum(width, -width)) - F.log(w_anchor),
+                w_pred_extract) * box_learning_scale) / 2
         loss_h += F.sum(
-            F.squared_difference(F.log(height) - F.log(h_anchor), h_pred_extract) *
-            box_learning_scale) / 2
+            F.squared_difference(
+                F.log(F.maximum(height, -height)) - F.log(h_anchor),
+                h_pred_extract) * box_learning_scale) / 2
         loss_conf += F.sum(
             F.squared_difference(
                 multi_box_iou(center_x, center_y, width, height, (x_pred_extract + center_x_shift)
@@ -324,10 +290,6 @@ class YOLOv2(chainer.Chain):
                               F.exp(w_pred_extract) * w_anchor, F.exp(h_pred_extract) * h_anchor),
                 conf_pred_extract) * conf_learning_scale) / 2
         loss_prob = F.sum(F.squared_difference(prob, prob_pred_extract)) / 2
-        """
-        print("loss_x: %f  loss_y: %f  loss_w: %f  loss_h: %f  loss_conf: %f   loss_prob: %f" %
-              (loss_x.data, loss_y.data, loss_w.data, loss_h.data, loss_conf.data, loss_prob.data))
-        """
         loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_prob
 
         chainer.report({

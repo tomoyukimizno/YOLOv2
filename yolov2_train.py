@@ -17,7 +17,7 @@ from yolov2 import YOLOv2
 
 
 def my_converter(batch, device=None):
-    return concat_examples(batch, device=device, padding=100)
+    return concat_examples(batch, device=device, padding=-1)
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
@@ -52,20 +52,15 @@ class YoloDataset(chainer.dataset.DatasetMixin):
         # """
         image *= (1.0 / 255.0)
         data = np.loadtxt(self.path_bboxes[i], delimiter=" ", dtype=np.float32)
-        return image, data  # data を同じ行数にする必要あり、今は適当な値
-        # return image, chainer.Variable(data)  # data を同じ行数にする必要あり、今は適当な値
-        # return image, int(label), int(center_x), int(center_y), int(width), int(height)
+        return image, data
 
 
 def copy_layer(src, dst, max_num):
     for i in range(1, max_num + 1):
         src_layer = eval("src.dark%d" % i)
         dst_layer = eval("dst.dark%d" % i)
-        # copy conv
         dst_layer.c = src_layer.c
-        # copy bn
         dst_layer.n = src_layer.n
-        # copy bias
         dst_layer.b = src_layer.b
 
 
@@ -98,13 +93,12 @@ if __name__ == "__main__":
     print("loading initial model...")
     if args.gpu >= 0:
         chainer.cuda.get_device_from_id(args.gpu).use()
-        # cupy.cuda.Device(args.gpu).use()
 
     model = YOLOv2(n_classes=n_classes, n_boxes=n_boxes)
     if args.initmodel:
         print('Load model from', args.initmodel)
         darknet = Darknet19()
-        serializers.load_npz(args.initmodel, darknet)  # load saved model
+        serializers.load_npz(args.initmodel, darknet)
         copy_layer(darknet, model, 18)
 
     if args.gpu >= 0:
