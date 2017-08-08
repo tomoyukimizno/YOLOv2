@@ -1,23 +1,26 @@
 import argparse
 import numpy as np
 
+import chainer
 from chainer import serializers, Variable
 import chainer.functions as F
+import cupy
 import cv2
 
 from lib.utils import *
 from lib.functions import *
-from yolov2 import YOLOv2, YOLOv2Predictor
+from yolov2 import YOLOv2
 
 
 class AnimalPredictor:
     def __init__(self):
         # hyper parameters
         # weight_file = "./backup/yolov2_final_cpu.model"
-        weight_file = "backup.model"
+        # weight_file = "backup.model"
+        weight_file = "backup4\\model_iter_644813"
         self.n_classes = 10
         self.n_boxes = 5
-        self.detection_thresh = 0.3
+        self.detection_thresh = 0.001
         self.iou_thresh = 0.3
         # self.label_file = "./data/label.txt"
         # with open(self.label_file, "r") as f:
@@ -27,8 +30,10 @@ class AnimalPredictor:
         print("loading animal model...")
         model = YOLOv2(n_classes=self.n_classes, n_boxes=self.n_boxes)
         serializers.load_npz(weight_file, model)  # load saved model
-        model.predictor.train = False
-        model.predictor.finetune = False
+        model.train = False
+        model.finetune = False
+        chainer.cuda.get_device_from_id(0).use()
+        model.to_gpu()
         self.model = model
 
     def __call__(self, orig_img):
@@ -44,10 +49,11 @@ class AnimalPredictor:
         # forward
         x_data = img[np.newaxis, :, :, :]
         x = Variable(x_data)
-        x, y, w, h, conf, prob = self.model.predict(x)
+        x.to_gpu()
+        x, y, w, h, conf, prob = self.model.predictor(x)
 
         # parse results
-        _, _, _, grid_h, grid_w = x.shape
+        _, _, grid_h, grid_w = x.shape
         x = F.reshape(x, (self.n_boxes, grid_h, grid_w)).data
         y = F.reshape(y, (self.n_boxes, grid_h, grid_w)).data
         w = F.reshape(w, (self.n_boxes, grid_h, grid_w)).data
@@ -55,10 +61,15 @@ class AnimalPredictor:
         conf = F.reshape(conf, (self.n_boxes, grid_h, grid_w)).data
         prob = F.transpose(
             F.reshape(prob, (self.n_boxes, self.n_classes, grid_h, grid_w)), (1, 0, 2, 3)).data
+        print(conf)
+        print(conf.shape)
+        print(prob)
+        print(prob.shape)
+        print(conf * prob)
+        print((conf * prob).shape)
         detected_indices = (conf * prob).max(axis=0) > self.detection_thresh
-
         results = []
-        for i in range(detected_indices.sum()):
+        for i in range(int(detected_indices.sum())):
             results.append({
                 # "label": self.labels[prob.transpose(1, 2, 3, 0)[detected_indices][i].argmax()],
                 "label": prob.transpose(1, 2, 3, 0)[detected_indices][i].argmax(),

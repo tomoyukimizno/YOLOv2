@@ -311,4 +311,54 @@ class YOLOv2(chainer.Chain):
         self.anchors = anchors
 
     def predictor(self, x):
-        pass
+        # ネットワーク出力の計算
+        # common layer
+        h = CRP(self.dark1, x, train=self.train, pooling=True)
+        h = CRP(self.dark2, h, train=self.train, pooling=True)
+        h = CRP(self.dark3, h, train=self.train)
+        h = CRP(self.dark4, h, train=self.train)
+        h = CRP(self.dark5, h, train=self.train, pooling=True)
+        h = CRP(self.dark6, h, train=self.train)
+        h = CRP(self.dark7, h, train=self.train)
+        h = CRP(self.dark8, h, train=self.train, pooling=True)
+        h = CRP(self.dark9, h, train=self.train)
+        h = CRP(self.dark10, h, train=self.train)
+        h = CRP(self.dark11, h, train=self.train)
+        h = CRP(self.dark12, h, train=self.train)
+        h = CRP(self.dark13, h, train=self.train)
+        high_resolution_feature = F.space2depth(h, 2)  # 高解像度特徴量をサイズ落として保存
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = CRP(self.dark14, h, train=self.train)
+        h = CRP(self.dark15, h, train=self.train)
+        h = CRP(self.dark16, h, train=self.train)
+        h = CRP(self.dark17, h, train=self.train)
+        h = CRP(self.dark18, h, train=self.train)
+        # new layer
+        h = CRP(self.dark19, h, train=self.train)
+        h = CRP(self.dark20, h, train=self.train)
+        h = F.concat((high_resolution_feature, h), axis=1)  # output concatnation
+        h = CRP(self.dark21, h, train=self.train)
+        h = self.bias22(self.conv22(h))
+
+        n_batch, _, grid_h, grid_w = h.shape
+
+        # NW出力の整形
+        pred, prob_pred = F.split_axis(
+            F.reshape(h, (n_batch, self.n_boxes, self.n_classes + 5, grid_h, grid_w)), [5], axis=2)
+        x_pred, y_pred, w_pred, h_pred, conf_pred = F.separate(F.sigmoid(pred), axis=2)
+        prob_pred = F.sigmoid(F.transpose(prob_pred, (0, 2, 1, 3, 4)))
+
+        x_shift = F.broadcast_to(cupy.arange(grid_w, dtype=cupy.float32), x_pred.shape)
+        y_shift = F.broadcast_to(
+            cupy.arange(
+                grid_h, dtype=cupy.float32).reshape(grid_h, 1), y_pred.shape)
+        w_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1)), w_pred.shape)
+        h_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1)), h_pred.shape)
+        box_x = F.broadcast_to((x_pred + x_shift) / grid_w, x_pred.shape)
+        box_y = F.broadcast_to((y_pred + y_shift) / grid_h, y_pred.shape)
+        box_w = F.broadcast_to(F.exp(w_pred) * w_anchor / grid_w, w_pred.shape)
+        box_h = F.broadcast_to(F.exp(h_pred) * h_anchor / grid_h, h_pred.shape)
+
+        return box_x, box_y, box_w, box_h, conf_pred, prob_pred
