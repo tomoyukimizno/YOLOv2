@@ -4,7 +4,6 @@ import numpy as np
 import chainer
 from chainer import serializers, Variable
 import chainer.functions as F
-import cupy
 import cv2
 
 from lib.utils import *

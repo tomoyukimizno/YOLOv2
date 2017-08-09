@@ -89,8 +89,9 @@ class YOLOv2(chainer.Chain):
         self.n_boxes = n_boxes
         self.n_classes = n_classes
         self.anchors = cupy.array(
-            [[5.375, 5.03125], [5.40625, 4.6875], [2.96875, 2.53125], [2.59375, 2.78125],
-             [1.9375, 3.25]],
+            [[1.3203125, 1.796527777777778], [1.4625000000000001, 2.004166666666667],
+             [1.7671875, 2.473611111111111], [1.2864583333333333, 1.7333333333333334],
+             [2.803125, 4.098611111111111]],
             dtype=cupy.float32)
         self.thresh = 0.6
 
@@ -124,61 +125,27 @@ class YOLOv2(chainer.Chain):
         h = CRP(self.dark21, h, train=self.train)
         h = self.bias22(self.conv22(h))
 
+        # NW出力の整形
         n_batch, _, grid_h, grid_w = h.shape
         _, n_data, _ = t.shape  # n_batch, n_data, (label,x,y,w,h)
-
-        # NW出力の整形
         pred, prob_pred = F.split_axis(
             F.reshape(h, (n_batch, self.n_boxes, self.n_classes + 5, grid_h, grid_w)), [5], axis=2)
         x_pred, y_pred, w_pred, h_pred, conf_pred = F.separate(F.sigmoid(pred), axis=2)
         prob_pred = F.sigmoid(F.transpose(prob_pred, (0, 2, 1, 3, 4)))
+        # 真の値の整形
+        label, center_x, center_y, width, height = F.separate(t, axis=2)
+
         # learning lateの初期化
         box_learning_scale = F.tile(cupy.array(0.1, dtype=cupy.float32), conf_pred.shape)
         conf_learning_scale = F.tile(cupy.array(0.1, dtype=cupy.float32), conf_pred.shape)
 
-        # 真の値の整形
-        label, center_x, center_y, width, height = F.separate(t, axis=2)
-
         # objectの存在するanchor boxの探索
-        abs_anchors = (self.anchors / cupy.array([grid_w, grid_h])).astype(cupy.float32)
-        ex_w = F.broadcast_to(width, (self.n_boxes, *width.shape))
-        ex_h = F.broadcast_to(height, (self.n_boxes, *height.shape))
-        ex_aw = F.broadcast_to(
-            F.reshape(abs_anchors[:, 0], (self.n_boxes, 1, 1)), (self.n_boxes, *width.shape))
-        ex_ah = F.broadcast_to(
-            F.reshape(abs_anchors[:, 1], (self.n_boxes, 1, 1)), (self.n_boxes, *height.shape))
-        intersection = F.minimum(ex_w, ex_aw) * F.minimum(ex_h, ex_ah)
-        anchor_index = F.argmax(
-            intersection / (ex_w * ex_h + ex_aw * ex_ah - intersection), axis=0)
+        anchor_index = self.get_anchor_index(width, height, grid_w, grid_h)
 
-        # objectの予測位置を算出
-        x_shift = F.broadcast_to(cupy.arange(grid_w, dtype=cupy.float32), x_pred.shape)
-        y_shift = F.broadcast_to(
-            cupy.arange(
-                grid_h, dtype=cupy.float32).reshape(grid_h, 1), y_pred.shape)
-        w_anchor = F.broadcast_to(
-            F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1)), w_pred.shape)
-        h_anchor = F.broadcast_to(
-            F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1)), h_pred.shape)
-        box_x = F.broadcast_to((x_pred + x_shift) / grid_w, (n_data, *x_pred.shape))
-        box_y = F.broadcast_to((y_pred + y_shift) / grid_h, (n_data, *y_pred.shape))
-        box_w = F.broadcast_to(F.exp(w_pred) * w_anchor / grid_w, (n_data, *w_pred.shape))
-        box_h = F.broadcast_to(F.exp(h_pred) * h_anchor / grid_h, (n_data, *h_pred.shape))
-
-        # 真の位置と比較(IOUにて)
-        # バッチサイズ分まとめて比較
-        tbox_x = F.broadcast_to(
-            F.reshape(F.swapaxes(center_x, 0, 1), (n_data, n_batch, 1, 1, 1)),
-            (n_data, *x_pred.shape))
-        tbox_y = F.broadcast_to(
-            F.reshape(F.swapaxes(center_y, 0, 1), (n_data, n_batch, 1, 1, 1)),
-            (n_data, *x_pred.shape))
-        tbox_w = F.broadcast_to(
-            F.reshape(F.swapaxes(width, 0, 1), (n_data, n_batch, 1, 1, 1)),
-            (n_data, *x_pred.shape))
-        tbox_h = F.broadcast_to(
-            F.reshape(F.swapaxes(height, 0, 1), (n_data, n_batch, 1, 1, 1)),
-            (n_data, *x_pred.shape))
+        box_x, box_y, box_w, box_h = self.get_pred_box(x_pred, y_pred, w_pred, h_pred,
+                                                       (n_data, *x_pred.shape))
+        tbox_x, tbox_y, tbox_w, tbox_h = self.get_true_box(center_x, center_y, width, height,
+                                                           (n_data, *x_pred.shape))
         best_ious = F.max(
             multi_box_iou(box_x, box_y, box_w, box_h, tbox_x, tbox_y, tbox_w, tbox_h), axis=0)
 
@@ -187,7 +154,7 @@ class YOLOv2(chainer.Chain):
         # (効率的?に計算するため右辺ではゼロ行列を利用してステップ関数を作っている)
         zeros = F.tile(cupy.array(0, dtype=cupy.float32), x_pred.shape)
         conf_learning_scale *= F.ceil(F.maximum(self.thresh - best_ious, zeros))
-        conf = F.ceil(F.maximum(best_ious - self.thresh, zeros)) * conf_pred * best_ious
+        conf = F.ceil(F.maximum(best_ious - self.thresh, zeros)) * conf_pred
 
         # オブジェクトのない位置のloss計算
         comma_5s = F.tile(cupy.array(0.5, dtype=cupy.float32), x_pred.shape)
@@ -202,14 +169,8 @@ class YOLOv2(chainer.Chain):
         comma_5s = F.tile(cupy.array(0.5, dtype=cupy.float32), center_x.shape)
         batch = [index[0] for index in np.ndindex(n_batch, n_data)]
         anchor = [int(anchor_index[index].data) for index in np.ndindex(n_batch, n_data)]
-        x_index = [
-            min(int(center_x[index].data * grid_w), grid_w - 1)
-            for index in np.ndindex(n_batch, n_data)
-        ]
-        y_index = [
-            min(int(center_y[index].data * grid_h), grid_h - 1)
-            for index in np.ndindex(n_batch, n_data)
-        ]
+        x_index = [int(center_x[index].data * grid_w) for index in np.ndindex(n_batch, n_data)]
+        y_index = [int(center_y[index].data * grid_h) for index in np.ndindex(n_batch, n_data)]
         l = [int(label[index].data) for index in np.ndindex(n_batch, n_data)]
         x_pred_extract = F.reshape(
             cupy.array(x_pred[batch, anchor, y_index, x_index].data), center_x.shape)
@@ -224,10 +185,11 @@ class YOLOv2(chainer.Chain):
         # padding 箇所はlearning rateを0にして無害化
         box_learning_scale_extract = F.reshape(
             cupy.array(box_learning_scale[batch, anchor, y_index, x_index].data),
-            width.shape) * F.ceil(1 + width)
+            width.shape) * F.floor(1 + width)
         conf_learning_scale_extract = F.reshape(
             cupy.array(conf_learning_scale[batch, anchor, y_index, x_index].data),
-            height.shape) * F.ceil(1 + height)
+            width.shape) * F.floor(1 + width)
+        abs_anchors = (self.anchors / cupy.array([grid_w, grid_h])).astype(cupy.float32)
         w_anchor = F.reshape(abs_anchors[anchor][:, 0], width.shape)
         h_anchor = F.reshape(abs_anchors[anchor][:, 1], height.shape)
 
@@ -243,11 +205,8 @@ class YOLOv2(chainer.Chain):
             F.broadcast_to(
                 Variable(
                     cupy.reshape(
-                        cupy.maximum(
-                            -cupy.array(
-                                l, dtype=cupy.float32),
-                            cupy.zeros(
-                                len(l), dtype=cupy.float32)), (*center_x.shape, 1))),
+                        cupy.ceil(cupy.tanh(-cupy.array(
+                            l, dtype=cupy.float32))), (*label.shape, 1))),
                 prob_pred_extract.shape),
             prob_pred_extract,
             F.reshape(Variable(one_hots), prob_pred_extract.shape))
@@ -260,9 +219,7 @@ class YOLOv2(chainer.Chain):
         loss_h -= F.sum(F.square(h_pred_extract) * box_learning_scale_extract) / 2
         loss_conf -= F.sum(F.square(conf_pred_extract) * conf_learning_scale_extract) / 2
         # 真の位置のlearning rateを設定
-        # 1 にする
         box_learning_scale = F.ceil(box_learning_scale_extract)
-        # 10 にする(元論文では5)
         conf_learning_scale = F.ceil(box_learning_scale_extract) * 10
         # オブジェクトのある位置のlossを足し上げる
         center_x_grid = center_x * grid_w
@@ -304,11 +261,44 @@ class YOLOv2(chainer.Chain):
 
         return loss
 
-    def make_teaching_data(self):
-        pass
-
     def init_anchor(self, anchors):
         self.anchors = anchors
+
+    def get_anchor_index(self, width, height, grid_w, grid_h):
+        abs_anchors = (self.anchors / cupy.array([grid_w, grid_h])).astype(cupy.float32)
+        ex_w = F.broadcast_to(width, (self.n_boxes, *width.shape))
+        ex_h = F.broadcast_to(height, (self.n_boxes, *height.shape))
+        ex_aw = F.broadcast_to(
+            F.reshape(abs_anchors[:, 0], (self.n_boxes, 1, 1)), (self.n_boxes, *width.shape))
+        ex_ah = F.broadcast_to(
+            F.reshape(abs_anchors[:, 1], (self.n_boxes, 1, 1)), (self.n_boxes, *height.shape))
+        intersection = F.minimum(ex_w, ex_aw) * F.minimum(ex_h, ex_ah)
+        return F.argmax(intersection / (ex_w * ex_h + ex_aw * ex_ah - intersection), axis=0)
+
+    def get_pred_box(self, x_pred, y_pred, w_pred, h_pred, shape):
+        _, _, grid_h, grid_w = x_pred.shape
+        x_shift = F.broadcast_to(cupy.arange(grid_w, dtype=cupy.float32), x_pred.shape)
+        y_shift = F.broadcast_to(
+            cupy.arange(
+                grid_h, dtype=cupy.float32).reshape(grid_h, 1), y_pred.shape)
+        w_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 0], (self.n_boxes, 1, 1)), w_pred.shape)
+        h_anchor = F.broadcast_to(
+            F.reshape(self.anchors[:, 1], (self.n_boxes, 1, 1)), h_pred.shape)
+        box_x = F.broadcast_to((x_pred + x_shift) / grid_w, shape)
+        box_y = F.broadcast_to((y_pred + y_shift) / grid_h, shape)
+        box_w = F.broadcast_to(F.exp(w_pred) * w_anchor / grid_w, shape)
+        box_h = F.broadcast_to(F.exp(h_pred) * h_anchor / grid_h, shape)
+        return box_x, box_y, box_w, box_h
+
+    @staticmethod
+    def make_true_box(data, shape):
+        n_batch, n_data = data.shape
+        return F.broadcast_to(F.reshape(F.swapaxes(data, 0, 1), (n_data, n_batch, 1, 1, 1)), shape)
+
+    def get_true_box(self, center_x, center_y, width, height, shape):
+        return self.make_true_box(center_x, shape), self.make_true_box(
+            center_y, shape), self.make_true_box(width, shape), self.make_true_box(height, shape)
 
     def predictor(self, x):
         # ネットワーク出力の計算

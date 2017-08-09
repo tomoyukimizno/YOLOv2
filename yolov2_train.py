@@ -9,7 +9,6 @@ import chainer
 # from chainer import functions as F
 from chainer import serializers
 from chainer import training
-from chainer.dataset.convert import concat_examples
 from chainer.training import extensions
 
 from darknet19 import Darknet19
@@ -17,7 +16,7 @@ from yolov2 import YOLOv2
 
 
 def my_converter(batch, device=None):
-    return concat_examples(batch, device=device, padding=-1)
+    return chainer.dataset.convert.concat_examples(batch, device=device, padding=-1)
 
 
 class YoloDataset(chainer.dataset.DatasetMixin):
@@ -123,8 +122,8 @@ if __name__ == "__main__":
     # updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
-    val_interval = 500, 'epoch'
-    log_interval = 100, 'epoch'
+    val_interval = 5, 'epoch'
+    log_interval = 1, 'epoch'
 
     learning_rate = extensions.LinearShift("lr", (1e-5, 1e-4), (500 - 2, 500 - 1))
     learning_rate = extensions.LinearShift("lr", (1e-4, 1e-5), (10000 - 2, 10000 - 1))
