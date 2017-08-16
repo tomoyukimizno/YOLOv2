@@ -3,7 +3,7 @@
 import argparse
 import numpy as np
 import os
-import random
+# import random
 
 import chainer
 # from chainer import functions as F
@@ -84,7 +84,6 @@ if __name__ == "__main__":
 
     # hyper parameters
     backup_file = os.path.join(args.out, "backup.model")
-    lr_decay_power = 4  # learning_rate の減衰のさせ方がわかっていない
     n_classes = 10
     n_boxes = 5
 
@@ -122,11 +121,16 @@ if __name__ == "__main__":
     # updater = yolov2_updater.YOLOUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), args.out)
 
-    val_interval = 5, 'epoch'
-    log_interval = 1, 'epoch'
-
+    val_interval = 500, 'epoch'
+    log_interval = 100, 'epoch'
+    """
     learning_rate = extensions.LinearShift("lr", (1e-5, 1e-4), (500 - 2, 500 - 1))
+    learning_rate.trigger = 1, 'epoch'
+    trainer.extend(learning_rate)
     learning_rate = extensions.LinearShift("lr", (1e-4, 1e-5), (10000 - 2, 10000 - 1))
+    learning_rate.trigger = 1, 'epoch'
+    trainer.extend(learning_rate)
+    """
     learning_rate = extensions.LinearShift("lr", (1e-5, 1e-6), (20000 - 2, 20000 - 1))
     learning_rate.trigger = 1, 'epoch'
     trainer.extend(learning_rate)

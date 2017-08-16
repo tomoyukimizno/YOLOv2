@@ -1,7 +1,9 @@
 import chainer.functions as F
 import numpy as np
-import cv2
+
 from chainer import Variable
+import cupy
+import cv2
 
 
 def print_cnn_info(name, link, shape_before, shape_after, time):
@@ -42,7 +44,6 @@ def print_fc_info(name, link, time):
 
 # x, y, w, hの4パラメータを保持するだけのクラス
 class Box():
-
     def __init__(self, x, y, w, h):
         self.x = x
         self.y = y
@@ -52,7 +53,7 @@ class Box():
     def int_left_top(self):
         half_width = self.w / 2
         half_height = self.h / 2
-        return (int(round(self.x - half_width)), int(round(self.y - half_height)))
+        return (int(cupy.rint(self.x - half_width)), int(cupy.rint(self.y - half_height)))
 
     def left_top(self):
         half_width = self.w / 2
@@ -62,7 +63,7 @@ class Box():
     def int_right_bottom(self):
         half_width = self.w / 2
         half_height = self.h / 2
-        return (int(round(self.x + half_width)), int(round(self.y + half_height)))
+        return (int(cupy.rint(self.x + half_width)), int(cupy.rint(self.y + half_height)))
 
     def right_bottom(self):
         half_width = self.w / 2
@@ -209,8 +210,8 @@ def reshape_to_yolo_size(img):
         input_width *= max_pixel / max_edge
         input_height *= max_pixel / max_edge
 
-    input_width = int(input_width / 32 + round(input_width % 32 / 32)) * 32
-    input_height = int(input_height / 32 + round(input_height % 32 / 32)) * 32
+    input_width = int(input_width / 32 + cupy.rint(input_width % 32 / 32)) * 32
+    input_height = int(input_height / 32 + cupy.rint(input_height % 32 / 32)) * 32
     img = cv2.resize(img, (input_width, input_height))
 
     return img

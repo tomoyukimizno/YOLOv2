@@ -16,10 +16,10 @@ class AnimalPredictor:
         # hyper parameters
         # weight_file = "./backup/yolov2_final_cpu.model"
         # weight_file = "backup.model"
-        weight_file = "backup4\\model_iter_644813"
+        weight_file = "tiny_yolo\\model_iter_398"
         self.n_classes = 10
         self.n_boxes = 5
-        self.detection_thresh = 0.001
+        self.detection_thresh = 0.5
         self.iou_thresh = 0.3
         # self.label_file = "./data/label.txt"
         # with open(self.label_file, "r") as f:
@@ -60,12 +60,14 @@ class AnimalPredictor:
         conf = F.reshape(conf, (self.n_boxes, grid_h, grid_w)).data
         prob = F.transpose(
             F.reshape(prob, (self.n_boxes, self.n_classes, grid_h, grid_w)), (1, 0, 2, 3)).data
+        """
         print(conf)
         print(conf.shape)
         print(prob)
         print(prob.shape)
         print(conf * prob)
         print((conf * prob).shape)
+        """
         detected_indices = (conf * prob).max(axis=0) > self.detection_thresh
         results = []
         for i in range(int(detected_indices.sum())):
