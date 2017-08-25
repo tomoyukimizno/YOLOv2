@@ -16,10 +16,10 @@ class AnimalPredictor:
         # hyper parameters
         # weight_file = "./backup/yolov2_final_cpu.model"
         # weight_file = "backup.model"
-        weight_file = "tiny_yolo\\model_iter_398"
+        weight_file = "yolo\\yolov2_final.model"
         self.n_classes = 10
         self.n_boxes = 5
-        self.detection_thresh = 0.5
+        self.detection_thresh = 0.01
         self.iou_thresh = 0.3
         # self.label_file = "./data/label.txt"
         # with open(self.label_file, "r") as f:

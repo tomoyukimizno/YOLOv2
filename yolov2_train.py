@@ -56,11 +56,15 @@ class YoloDataset(chainer.dataset.DatasetMixin):
 
 def copy_layer(src, dst, max_num):
     for i in range(1, max_num + 1):
-        src_layer = eval("src.dark%d" % i)
-        dst_layer = eval("dst.dark%d" % i)
-        dst_layer.c = src_layer.c
-        dst_layer.n = src_layer.n
-        dst_layer.b = src_layer.b
+        src_layer = eval("src.conv%d" % i)
+        dst_layer = eval("dst.conv%d" % i)
+        dst_layer = src_layer
+        src_layer = eval("src.bn%d" % i)
+        dst_layer = eval("dst.bn%d" % i)
+        dst_layer = src_layer
+        src_layer = eval("src.bias%d" % i)
+        dst_layer = eval("dst.bias%d" % i)
+        dst_layer = src_layer
 
 
 if __name__ == "__main__":
@@ -98,6 +102,7 @@ if __name__ == "__main__":
         darknet = Darknet19()
         serializers.load_npz(args.initmodel, darknet)
         copy_layer(darknet, model, 18)
+        # serializers.load_npz(args.initmodel, model)
 
     if args.gpu >= 0:
         model.to_gpu()
@@ -113,7 +118,7 @@ if __name__ == "__main__":
     optimizer = chainer.optimizers.MomentumSGD(lr=1e-5, momentum=0.9)
     optimizer.use_cleargrads()
     optimizer.setup(model)
-    optimizer.add_hook(chainer.optimizer.WeightDecay(0.005), 'hook_dec')
+    optimizer.add_hook(chainer.optimizer.WeightDecay(0.0005), 'hook_dec')
 
     # Set up a trainer
     updater = training.StandardUpdater(

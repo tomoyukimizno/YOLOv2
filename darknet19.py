@@ -6,24 +6,6 @@ import chainer.links as L
 import chainer.functions as F
 
 
-def darknetConv2D(in_channel, out_channel, ksize=3, pad=1):
-    return chainer.Chain(
-        c=L.Convolution2D(
-            in_channel, out_channel, ksize=ksize, stride=1, pad=pad, nobias=True),
-        n=L.BatchNormalization(
-            out_channel, use_beta=False),
-        b=L.Bias(shape=(out_channel, )), )
-
-
-def CRP(c, h, train, stride=2, pooling=False):
-    # convolution -> leakyReLU -> MaxPooling
-    h = c.b(c.n(c.c(h), test=not train))
-    h = F.leaky_relu(h, slope=0.1)
-    if pooling:
-        h = F.max_pooling_2d(h, ksize=2, stride=stride, pad=0)
-    return h
-
-
 class Darknet19(chainer.Chain):
     """
     Darknet19
@@ -32,59 +14,124 @@ class Darknet19(chainer.Chain):
 
     def __init__(self):
         super(Darknet19, self).__init__(
-            # common layers for both pretrained layers and yolov2
-            dark1=darknetConv2D(3, 32),
-            dark2=darknetConv2D(None, 64),
-            dark3=darknetConv2D(None, 128),
-            dark4=darknetConv2D(
-                None, 64, ksize=1, pad=0),
-            dark5=darknetConv2D(None, 128),
-            dark6=darknetConv2D(None, 256),
-            dark7=darknetConv2D(
-                None, 128, ksize=1, pad=0),
-            dark8=darknetConv2D(None, 256),
-            dark9=darknetConv2D(None, 512),
-            dark10=darknetConv2D(
-                None, 256, ksize=1, pad=0),
-            dark11=darknetConv2D(None, 512),
-            dark12=darknetConv2D(
-                None, 256, ksize=1, pad=0),
-            dark13=darknetConv2D(None, 512),
-            dark14=darknetConv2D(None, 1024),
-            dark15=darknetConv2D(
-                None, 512, ksize=1, pad=0),
-            dark16=darknetConv2D(None, 1024),
-            dark17=darknetConv2D(
-                None, 512, ksize=1, pad=0),
-            dark18=darknetConv2D(None, 1024),
-
-            # new layer
+            conv1=L.Convolution2D(
+                3, 32, ksize=3, stride=1, pad=1, nobias=True),
+            bn1=L.BatchNormalization(
+                32, use_beta=False, eps=2e-5),
+            bias1=L.Bias(shape=(32, )),
+            conv2=L.Convolution2D(
+                32, 64, ksize=3, stride=1, pad=1, nobias=True),
+            bn2=L.BatchNormalization(
+                64, use_beta=False, eps=2e-5),
+            bias2=L.Bias(shape=(64, )),
+            conv3=L.Convolution2D(
+                64, 128, ksize=3, stride=1, pad=1, nobias=True),
+            bn3=L.BatchNormalization(
+                128, use_beta=False, eps=2e-5),
+            bias3=L.Bias(shape=(128, )),
+            conv4=L.Convolution2D(
+                128, 64, ksize=1, stride=1, pad=0, nobias=True),
+            bn4=L.BatchNormalization(
+                64, use_beta=False, eps=2e-5),
+            bias4=L.Bias(shape=(64, )),
+            conv5=L.Convolution2D(
+                64, 128, ksize=3, stride=1, pad=1, nobias=True),
+            bn5=L.BatchNormalization(
+                128, use_beta=False, eps=2e-5),
+            bias5=L.Bias(shape=(128, )),
+            conv6=L.Convolution2D(
+                128, 256, ksize=3, stride=1, pad=1, nobias=True),
+            bn6=L.BatchNormalization(
+                256, use_beta=False, eps=2e-5),
+            bias6=L.Bias(shape=(256, )),
+            conv7=L.Convolution2D(
+                256, 128, ksize=1, stride=1, pad=0, nobias=True),
+            bn7=L.BatchNormalization(
+                128, use_beta=False, eps=2e-5),
+            bias7=L.Bias(shape=(128, )),
+            conv8=L.Convolution2D(
+                128, 256, ksize=3, stride=1, pad=1, nobias=True),
+            bn8=L.BatchNormalization(
+                256, use_beta=False, eps=2e-5),
+            bias8=L.Bias(shape=(256, )),
+            conv9=L.Convolution2D(
+                256, 512, ksize=3, stride=1, pad=1, nobias=True),
+            bn9=L.BatchNormalization(
+                512, use_beta=False, eps=2e-5),
+            bias9=L.Bias(shape=(512, )),
+            conv10=L.Convolution2D(
+                512, 256, ksize=1, stride=1, pad=0, nobias=True),
+            bn10=L.BatchNormalization(
+                256, use_beta=False, eps=2e-5),
+            bias10=L.Bias(shape=(256, )),
+            conv11=L.Convolution2D(
+                256, 512, ksize=3, stride=1, pad=1, nobias=True),
+            bn11=L.BatchNormalization(
+                512, use_beta=False, eps=2e-5),
+            bias11=L.Bias(shape=(512, )),
+            conv12=L.Convolution2D(
+                512, 256, ksize=1, stride=1, pad=0, nobias=True),
+            bn12=L.BatchNormalization(
+                256, use_beta=False, eps=2e-5),
+            bias12=L.Bias(shape=(256, )),
+            conv13=L.Convolution2D(
+                256, 512, ksize=3, stride=1, pad=1, nobias=True),
+            bn13=L.BatchNormalization(
+                512, use_beta=False, eps=2e-5),
+            bias13=L.Bias(shape=(512, )),
+            conv14=L.Convolution2D(
+                512, 1024, ksize=3, stride=1, pad=1, nobias=True),
+            bn14=L.BatchNormalization(
+                1024, use_beta=False, eps=2e-5),
+            bias14=L.Bias(shape=(1024, )),
+            conv15=L.Convolution2D(
+                1024, 512, ksize=1, stride=1, pad=0, nobias=True),
+            bn15=L.BatchNormalization(
+                512, use_beta=False, eps=2e-5),
+            bias15=L.Bias(shape=(512, )),
+            conv16=L.Convolution2D(
+                512, 1024, ksize=3, stride=1, pad=1, nobias=True),
+            bn16=L.BatchNormalization(
+                1024, use_beta=False, eps=2e-5),
+            bias16=L.Bias(shape=(1024, )),
+            conv17=L.Convolution2D(
+                1024, 512, ksize=1, stride=1, pad=0, nobias=True),
+            bn17=L.BatchNormalization(
+                512, use_beta=False, eps=2e-5),
+            bias17=L.Bias(shape=(512, )),
+            conv18=L.Convolution2D(
+                512, 1024, ksize=3, stride=1, pad=1, nobias=True),
+            bn18=L.BatchNormalization(
+                1024, use_beta=False, eps=2e-5),
+            bias18=L.Bias(shape=(1024, )),
             conv19=L.Convolution2D(
                 1024, 10, ksize=1, stride=1, pad=1), )
         self.train = True
 
     def __call__(self, x, t):
-        # common layer
-        h = CRP(self.dark1, x, train=self.train, pooling=True)
-        h = CRP(self.dark2, h, train=self.train, pooling=True)
-        h = CRP(self.dark3, h, train=self.train)
-        h = CRP(self.dark4, h, train=self.train)
-        h = CRP(self.dark5, h, train=self.train, pooling=True)
-        h = CRP(self.dark6, h, train=self.train)
-        h = CRP(self.dark7, h, train=self.train)
-        h = CRP(self.dark8, h, train=self.train, pooling=True)
-        h = CRP(self.dark9, h, train=self.train)
-        h = CRP(self.dark10, h, train=self.train)
-        h = CRP(self.dark11, h, train=self.train)
-        h = CRP(self.dark12, h, train=self.train)
-        h = CRP(self.dark13, h, train=self.train, pooling=True)
-        h = CRP(self.dark14, h, train=self.train)
-        h = CRP(self.dark15, h, train=self.train)
-        h = CRP(self.dark16, h, train=self.train)
-        h = CRP(self.dark17, h, train=self.train)
-        h = CRP(self.dark18, h, train=self.train)
-
-        # new layer
+        h = F.leaky_relu(self.bias1(self.bn1(self.conv1(x), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias2(self.bn2(self.conv2(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias3(self.bn3(self.conv3(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias4(self.bn4(self.conv4(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias5(self.bn5(self.conv5(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias6(self.bn6(self.conv6(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias7(self.bn7(self.conv7(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias8(self.bn8(self.conv8(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias9(self.bn9(self.conv9(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias10(self.bn10(self.conv10(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias11(self.bn11(self.conv11(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias12(self.bn12(self.conv12(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias13(self.bn13(self.conv13(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias14(self.bn14(self.conv14(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias15(self.bn15(self.conv15(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias16(self.bn16(self.conv16(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias17(self.bn17(self.conv17(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias18(self.bn18(self.conv18(h), test=not self.train)), slope=0.1)
         h = self.conv19(h)
         h = F.reshape(
             F.average_pooling_2d(
@@ -95,27 +142,29 @@ class Darknet19(chainer.Chain):
         return loss
 
     def predictor(self, x):
-        # common layer
-        h = CRP(self.dark1, x, pooling=True)
-        h = CRP(self.dark2, h, pooling=True)
-        h = CRP(self.dark3, h)
-        h = CRP(self.dark4, h)
-        h = CRP(self.dark5, h, pooling=True)
-        h = CRP(self.dark6, h)
-        h = CRP(self.dark7, h)
-        h = CRP(self.dark8, h, pooling=True)
-        h = CRP(self.dark9, h)
-        h = CRP(self.dark10, h)
-        h = CRP(self.dark11, h)
-        h = CRP(self.dark12, h)
-        h = CRP(self.dark13, h, pooling=True)
-        h = CRP(self.dark14, h)
-        h = CRP(self.dark15, h)
-        h = CRP(self.dark16, h)
-        h = CRP(self.dark17, h)
-        h = CRP(self.dark18, h)
-
-        # new layer
+        h = F.leaky_relu(self.bias1(self.bn1(self.conv1(x), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias2(self.bn2(self.conv2(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias3(self.bn3(self.conv3(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias4(self.bn4(self.conv4(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias5(self.bn5(self.conv5(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias6(self.bn6(self.conv6(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias7(self.bn7(self.conv7(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias8(self.bn8(self.conv8(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias9(self.bn9(self.conv9(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias10(self.bn10(self.conv10(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias11(self.bn11(self.conv11(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias12(self.bn12(self.conv12(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias13(self.bn13(self.conv13(h), test=not self.train)), slope=0.1)
+        h = F.max_pooling_2d(h, ksize=2, stride=2, pad=0)
+        h = F.leaky_relu(self.bias14(self.bn14(self.conv14(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias15(self.bn15(self.conv15(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias16(self.bn16(self.conv16(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias17(self.bn17(self.conv17(h), test=not self.train)), slope=0.1)
+        h = F.leaky_relu(self.bias18(self.bn18(self.conv18(h), test=not self.train)), slope=0.1)
         h = self.conv19(h)
         h = F.reshape(
             F.average_pooling_2d(
