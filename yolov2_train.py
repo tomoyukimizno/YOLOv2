@@ -64,7 +64,7 @@ else:
 optimizer = optimizers.MomentumSGD(lr=learning_rate, momentum=momentum)
 optimizer.use_cleargrads()
 optimizer.setup(model)
-# optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
+optimizer.add_hook(chainer.optimizer.WeightDecay(weight_decay))
 
 # start to train
 print("start training")
@@ -106,13 +106,13 @@ for batch in range(max_batches):
         x.to_gpu()
 
         # forward
+        model.zerograds()
         loss = model(x, t)
         print("batch: %d     input size: %dx%d     learning rate: %f    loss: %f" %
               (batch, input_height, input_width, optimizer.lr, loss.data))
         print("/////////////////////////////////////")
 
         # backward and optimize
-        optimizer.zero_grads()
         loss.backward()
         optimizer.update()
 

@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     predictor = AnimalPredictor()
     nms_results = predictor(orig_img)
-
+    print(nms_results)
     # draw result
     for result in nms_results:
         left, top = result["box"].int_left_top()

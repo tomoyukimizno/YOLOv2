@@ -22,11 +22,6 @@ class PreprocessedDataset(chainer.dataset.DatasetMixin):
         return len(self.base)
 
     def get_example(self, i):
-        # It reads the i-th image/label pair and return a preprocessed image.
-        # It applies following preprocesses:
-        #     - Cropping (random or center rectangular)
-        #     - Random flip
-        #     - Scaling to [0, 1] value
         crop_size = self.crop_size
 
         image, label = self.base[i]
@@ -50,7 +45,7 @@ class PreprocessedDataset(chainer.dataset.DatasetMixin):
 
 if __name__ == "__main__":
     # hyper parameters
-    backup_path = "backup"
+    backup_path = "backup.yolo_data.yolo_lee"
     learning_rate = 0.001
     momentum = 0.9
     weight_decay = 0.0005
@@ -65,8 +60,6 @@ if __name__ == "__main__":
     parser.add_argument('--initmodel', help='Initialize the model from given file')
     parser.add_argument(
         '--loaderjob', '-j', type=int, help='Number of parallel data loading processes')
-    parser.add_argument(
-        '--mean', '-m', default='mean.npy', help='Mean file (computed by compute_mean.py)')
     parser.add_argument(
         '--resume', '-r', default='', help='Initialize the trainer from given file')
     parser.add_argument('--root', '-R', default='.', help='Root directory path of image files')
@@ -103,8 +96,8 @@ if __name__ == "__main__":
     updater = training.StandardUpdater(train_iter, optimizer, device=args.gpu)
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), backup_path)
 
-    val_interval = 25, 'epoch'
-    log_interval = 1, 'epoch'
+    val_interval = 250, 'epoch'
+    log_interval = 100, 'epoch'
 
     learning_rate = extensions.LinearShift("lr", (0.001, 0), (0, int(args.epoch)))
     learning_rate.trigger = 1, 'epoch'
@@ -143,4 +136,4 @@ if __name__ == "__main__":
     trainer.run()
     model.to_cpu()
     print("saving model to %s/darknet19_final.model" % (backup_path))
-    serializers.save_npz(os.path.join(backup_path, "darknet19_448_final.model"), model)
+    serializers.save_hdf5(os.path.join(backup_path, "darknet19_448_final.model.dhf5"), model)
