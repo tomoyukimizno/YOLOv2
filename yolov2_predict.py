@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 
+import chainer
 from chainer import serializers, Variable
 import chainer.functions as F
 import cv2
@@ -28,8 +29,7 @@ class AnimalPredictor:
         yolov2 = YOLOv2(n_classes=self.n_classes, n_boxes=self.n_boxes)
         model = YOLOv2Predictor(yolov2)
         serializers.load_npz(weight_file, model)  # load saved model
-        model.predictor.train = False
-        model.predictor.finetune = False
+
         self.model = model
 
     def __call__(self, orig_img):
@@ -45,7 +45,8 @@ class AnimalPredictor:
         # forward
         x_data = img[np.newaxis, :, :, :]
         x = Variable(x_data)
-        x, y, w, h, conf, prob = self.model.predict(x)
+        with chainer.using_config('train', False):
+            x, y, w, h, conf, prob = self.model.predict(x)
 
         # parse results
         _, _, _, grid_h, grid_w = x.shape
