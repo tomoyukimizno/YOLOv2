@@ -132,8 +132,8 @@ if __name__ == "__main__":
             extensions.PlotReport(
                 ['main/accuracy', 'validation/main/accuracy'], 'epoch', file_name='accuracy.png'))
     if args.resume:
-        chainer.serializers.load_npz(args.resume, trainer)
+        chainer.serializers.load_hdf5(args.resume, trainer)
     trainer.run()
     model.to_cpu()
     print("saving model to %s/darknet19_final.model" % (backup_path))
-    serializers.save_hdf5(os.path.join(backup_path, "darknet19_448_final.model.dhf5"), model)
+    serializers.save_hdf5(os.path.join(backup_path, "darknet19_448_final.model.hdf5"), model)
